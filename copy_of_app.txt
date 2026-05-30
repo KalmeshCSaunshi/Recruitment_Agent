@@ -1,0 +1,582 @@
+import os
+import requests
+from flask import Flask, render_template, request, jsonify
+from werkzeug.utils import secure_filename
+import PyPDF2
+import json
+import sourcing_agent
+import asyncio
+import fitz
+import docx2txt
+import pytesseract
+import uuid
+from pdf2image import convert_from_path
+import tiktoken
+import re
+from datetime import datetime
+import concurrent.futures
+
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['TEMP_FOLDER'] = 'temp_uploads'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+# Ensure directories exist
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['TEMP_FOLDER'], exist_ok=True)
+
+OLLAMA_API_URL = 'http://10.153.204.33:11434/api/generate'
+MODEL_NAME = 'gemma4:e4b'
+
+def get_exact_token_count(text):
+    encoding = tiktoken.get_encoding("cl100k_base") 
+    num_tokens = len(encoding.encode(text)) 
+    return num_tokens
+
+def extract_text_from_resume(filepath):
+    text = ""
+    try:
+        if filepath.lower().endswith('.docx') or filepath.lower().endswith('.doc'):
+            text = docx2txt.process(filepath)
+        elif filepath.lower().endswith('.pdf'):
+            with fitz.open(filepath) as doc:
+                for page in doc:
+                    page_text = page.get_text()
+                    if page_text:
+                        text += page_text + "\n"
+            
+            if len(text.strip()) < 50:
+                images = convert_from_path(filepath)
+                for image in images:
+                    page_text = pytesseract.image_to_string(image)
+                    text += page_text + "\n"
+    except Exception as e:
+        print(f"Error extracting document: {e}")
+    return text
+
+
+def calculate_skill_experience(resume_text, skill_keyword):
+
+    text = resume_text.replace("–", "-").replace("—", "-")
+
+    current_date = datetime.now()
+
+    total_months = 0
+
+    # Split by experience/project sections
+    experience_blocks = re.split(
+        r'\n(?=[A-Z][A-Za-z0-9 &(),.-]+\s+[A-Za-z]{3,9}\s\d{4}\s*-\s*(?:Present|[A-Za-z]{3,9}\s\d{4}))',
+        text
+    )
+
+    counted_ranges = set()
+
+    for block in experience_blocks:
+
+        if skill_keyword.lower() not in block.lower():
+            continue
+
+        date_match = re.search(
+            r'([A-Za-z]{3,9}\s\d{4})\s*-\s*(Present|[A-Za-z]{3,9}\s\d{4})',
+            block
+        )
+
+        if not date_match:
+            continue
+
+        start_str = date_match.group(1)
+        end_str = date_match.group(2)
+
+        try:
+
+            start_date = None
+            end_date = None
+
+            for fmt in ("%b %Y", "%B %Y"):
+
+                try:
+                    start_date = datetime.strptime(start_str, fmt)
+                    break
+                except:
+                    pass
+
+            if end_str.lower() == "present":
+                end_date = current_date
+            else:
+                for fmt in ("%b %Y", "%B %Y"):
+
+                    try:
+                        end_date = datetime.strptime(end_str, fmt)
+                        break
+                    except:
+                        pass
+
+            if not start_date or not end_date:
+                continue
+
+            # Prevent duplicate counting
+            range_key = (start_date, end_date)
+
+            if range_key in counted_ranges:
+                continue
+
+            counted_ranges.add(range_key)
+
+            months = (
+                (end_date.year - start_date.year) * 12
+                + (end_date.month - start_date.month)
+            )
+
+            total_months += max(months, 0)
+
+        except:
+            continue
+
+    years = round(total_months / 12, 1)
+
+    return str(years)
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/api/analyze', methods=['POST'])
+def analyze():
+    unique_id = uuid.uuid4().hex[:8]
+    if 'jd' not in request.form or 'resumes' not in request.files:
+        return jsonify({"error": "Missing JD or resumes"}), 400
+    
+    jd = request.form['jd']
+    resumes = request.files.getlist('resumes')
+    
+    def process_resume(resume):
+        if resume.filename == '': return None
+        try:
+            unique_id = str(uuid.uuid4())[:8]
+            original_filename = secure_filename(resume.filename)
+            filename = f"{unique_id}_{original_filename}"
+            temp_path = os.path.join(app.config['TEMP_FOLDER'], filename)
+            final_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            
+            resume.save(temp_path)
+            resume_text = extract_text_from_resume(temp_path)
+            
+            if not resume_text.strip():
+                if os.path.exists(temp_path): os.remove(temp_path)
+                return {
+                    "candidate_name": original_filename,
+                    "score": 0,
+                    "summary": "Error: Could not extract text.",
+                    "requirements_analysis": [],
+                    "project_insights": [],
+                    "scoring_breakdown": {}
+                }
+
+            # Smart Truncation: Keep the most important parts if too long
+            if len(resume_text) > 8000:
+                resume_text = resume_text[:4000] + "\n...[TRUNCATED]...\n" + resume_text[-4000:]
+
+            prompt = f"""
+            You are a Ruthless Technical Auditor.
+
+            Your ONLY responsibility is to verify whether mandatory technical requirements from the JD are explicitly implemented in the candidate's real project or professional experience sections.
+
+            You are NOT a recruiter.
+            You are NOT an assistant.
+            You are a strict verification engine.
+
+            STRICT AUDIT RULES:
+
+            1. STATUS RULE
+            - Use ONLY:
+              - "met"
+              - "not_met"
+
+            2. VALID EVIDENCE RULE
+            - A requirement is "met" ONLY if:
+              - the exact JD requirement keyword or phrase exists literally in implementation/project/professional experience content.
+            - Evidence from these sections is STRICTLY FORBIDDEN:
+              - Summary
+              - Skills
+              - Core Competencies
+              - Profile
+              - Header
+              - Certifications
+
+            3. EXACT MATCH RULE
+            - Semantic similarity is FORBIDDEN.
+            - Synonyms are FORBIDDEN.
+            - Related technologies are FORBIDDEN.
+            - The exact JD keyword must literally appear in the evidence sentence.
+
+            4. EVIDENCE RULE
+            - evidence_lines MUST contain:
+              - one exact sentence copied from the resume
+              - containing the exact required keyword.
+            - Never paraphrase.
+            - Never summarize.
+            - Never generate artificial evidence.
+
+            5. UNIQUE EVIDENCE RULE
+            - Every requirement MUST use a UNIQUE evidence sentence.
+            - Reusing the same evidence for multiple requirements is FORBIDDEN.
+
+            
+
+            6. HALLUCINATION RULE
+            - Do NOT assume experience.
+            - Do NOT infer missing skills.
+            - Do NOT estimate durations.
+            - Do NOT use semantic reasoning.
+
+            7. JD COPYING RULE
+            - Copying text from JD into evidence_lines is STRICTLY FORBIDDEN.
+
+            8. FAILURE RULE
+            - If exact implementation evidence is missing:
+              - status = "not_met"
+
+            9. SUMMARY RULE
+            - summary must describe the candidate's ACTUAL role/background ONLY from project and experience content.
+            - Never invent domain expertise.
+
+            10. SECTION ENFORCEMENT RULE
+            - Evidence taken from Summary, Skills, Core Competencies, or Profile sections must be rejected even if the keyword exists there.
+            - Only implementation/project/professional experience evidence is valid.
+
+            RETURN ONLY VALID JSON.
+
+            EXAMPLE OF JSON STRUCTURE:
+
+            {{
+              "candidate_name": "Full Name",
+              "email": "Email",
+              "target_role": "Role",
+              "summary": "Actual verified candidate background",
+              "scoring_breakdown": {{
+                "depth_logic": "Short audit reasoning"
+              }},
+              "requirements_analysis": [
+                {{
+                  "requirement": "Requirement Name",
+                  "is_mandatory": true,
+                    "status": "met / not_met",
+                  "years_of_experience in project": "0",
+                  "evidence_lines": "Exact sentence from project/experience section",
+                  "audit_note": "Short verification reason"
+                }}
+              ],
+
+                "project_insights": [
+                {{
+                  "project_name": "Project Name",
+                  "relevance": "Direct / None",
+                  "evidence": "Verified implementation details"
+                }}
+                ]
+            }}
+
+            MANDATORY AUDIT PROCESS:
+
+            1. Extract ALL mandatory technical requirements from the JD.
+            2. Search ONLY project/professional experience sections.
+            3. Verify literal keyword existence.
+            4. Reject semantic assumptions.
+            5. Reject summary-only claims.
+            6. Reject skills-section-only claims.
+            7. Reject reused evidence.
+            8. Reject estimated experience durations.
+            9. Reject unsupported technologies.
+            10. Return strict grounded JSON only.
+            
+            JD:
+            {jd}
+
+            Resume:
+            {resume_text}
+            """
+            
+            payload = {
+                "model": MODEL_NAME,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"num_ctx": 8192, "temperature": 0.0}
+            }
+            
+            # Ollama request with retries
+            raw_response = ""
+            for attempt in range(3):
+                try:
+                    response = requests.post(OLLAMA_API_URL, json=payload, timeout=90)
+                    response.raise_for_status()
+                    raw_response = response.json().get('response', '')
+                    break
+                except Exception as e:
+                    print(f"Ollama process_resume attempt {attempt + 1} failed: {e}")
+                    if attempt == 2:
+                        return {
+                            "candidate_name": original_filename,
+                            "score": 0,
+                            "summary": f"Error: Connection to AI server failed after 3 attempts. ({e})",
+                            "requirements_analysis": [],
+                            "project_insights": [],
+                            "scoring_breakdown": {}
+                        }
+                    import time
+                    time.sleep(2)
+            
+            # Robust JSON extraction
+            json_match = re.search(r'\{.*\}', raw_response, re.DOTALL)
+            if not json_match:
+                analysis = {"requirements_analysis": [], "summary": "Error: Invalid AI Response"}
+            else:
+                try:
+                    analysis = json.loads(json_match.group(0))
+                except:
+                    analysis = {"requirements_analysis": [], "summary": "Error: JSON Parse Failure"}
+            
+            # --- CODE-LEVEL TRUTH CHECK & SCORE CALCULATION ---
+            not_met_count = 0
+            mandatory_count = 0
+            resume_text_lower = resume_text.lower()
+            requirements = analysis.get('requirements_analysis', [])
+            for req in requirements:
+                req_name = req.get('requirement', '').lower()
+                is_mandatory = req.get('is_mandatory', False)
+                status = req.get('status', 'not_met')
+                evidence = req.get('evidence_lines', '').lower()
+                
+                if status == 'met':
+                    # # Extract keywords (split by space AND slashes)
+                    # raw_words = req_name.replace('/', ' ').replace(',', ' ').replace(':', ' ').split()
+                    # # A more aggressive filler list to prevent matching on words like 'tools' or 'debugging'
+                    # filler_words = {
+                    #     'good', 'understanding', 'of', 'and', 'with', 'experience', 'knowledge', 'strong', 
+                    #     'skills', 'basics', 'concepts', 'handling', 'layers', 'integration', 'tools', 
+                    #     'debugging', 'programming', 'platforms', 'various', 'using', 'framework', 'skills.', 'skills',
+                    #     'communication', 'protocols', 'functionalities', 'implementing', 'integrating'
+                    # }
+                    # keywords = [w.strip('(),/.:').lower() for w in raw_words if len(w.strip('(),/.:')) >= 1 and w.lower() not in filler_words]
+                    
+                    # # 1. Is it in the resume?
+                    # found_in_resume = all(kw in evidence for kw in keywords)
+                    # # 2. Is it in the AI's evidence quote?
+                    # found_in_evidence = any(kw in evidence for kw in keywords)
+
+                    raw_words = req_name.replace('/', ' ').replace(',', ' ').replace(':', ' ').split()
+
+                    filler_words = {
+                        'design', 'develop', 'integrate', 'working', 'with', 'using',
+                        'strong', 'understanding', 'knowledge', 'basic', 'concepts',
+                        'implementing', 'ensuring', 'reliable', 'communication',
+                        'between', 'different', 'components', 'activities',
+                        'contributing', 'improving', 'participating',
+                        'software', 'solutions', 'systems', 'techniques',
+                        'development', 'practices', 'based', 'architecture'
+                    }
+
+                    keywords = [
+                        w.strip('(),/.:').lower()
+                        for w in raw_words
+                        if len(w.strip('(),/.:')) > 2
+                        and w.lower() not in filler_words
+                    ]
+
+                    found_in_evidence = any(kw in evidence for kw in keywords)
+                    found_in_resume = any(kw in resume_text_lower for kw in keywords)
+                    
+                    # 3. ANTI-PLAGIARISM: Is the AI just quoting the JD?
+                    # If the evidence is too similar to the JD requirements, reject it.
+                    is_jd_clone = len(evidence) > 10 and (evidence in jd.lower() or jd.lower() in evidence)
+                    
+                    if not (found_in_resume and found_in_evidence) or is_jd_clone:
+                        req['status'] = 'not_met'
+                        if is_jd_clone:
+                            req['audit_note'] = "REJECTION: AI tried to use JD text as evidence. Plagiarism detected."
+                        else:
+                            req['audit_note'] = f"REJECTION: Keywords from '{req_name}' not found in evidence. Verification failed."
+                        status = 'not_met'
+                
+                # FINAL CONSISTENCY CHECK: If not met, force 0 years
+                if status == 'met':
+
+                    raw_words = req.get('requirement', '').replace('/', ' ').replace(',', ' ').split()
+
+                    filler_words = {
+                        'design', 'develop', 'integrate', 'working', 'with',
+                        'strong', 'understanding', 'knowledge', 'basic',
+                        'concepts', 'implementing', 'ensuring', 'reliable',
+                        'communication', 'between', 'different', 'components',
+                        'activities', 'contributing', 'improving',
+                        'participating', 'software', 'solutions',
+                        'systems', 'techniques', 'development',
+                        'practices', 'based', 'architecture'
+                    }
+
+                    keywords = [
+                        w.strip('(),/.:').lower()
+                        for w in raw_words
+                        if len(w.strip('(),/.:')) > 2
+                        and w.lower() not in filler_words
+                    ]
+
+                    best_exp = 0
+
+                    for kw in keywords:
+                        exp = float(calculate_skill_experience(resume_text, kw))
+                        best_exp = max(best_exp, exp)
+
+                    calculated_exp = str(best_exp)
+
+                    req['years_of_experience'] = calculated_exp
+
+                else:
+                    req['years_of_experience'] = "0"
+                    
+                if is_mandatory:
+                    mandatory_count += 1
+                    if status != 'met':
+                        not_met_count += 1
+            
+            # # --- EXPERIENCE SAMENESS CHECK ---
+            # all_met_exp = [req.get('years_of_experience') for req in requirements if req.get('status') == 'met']
+            # if len(all_met_exp) > 2 and len(set(all_met_exp)) == 1:
+            #     # All 'met' skills have the exact same duration - likely a hallucination
+            #     for req in requirements:
+            #         if req.get('status') == 'met':
+            #             req['audit_note'] = (req.get('audit_note') or "") + " [⚠️ WARNING: Potential Experience Hallucination detected. AI is using total career length instead of project duration.]"
+
+            # Recalculate scores based on the "Cleaned" requirements
+            m_score = int(((mandatory_count - not_met_count) / mandatory_count) * 10) if mandatory_count > 0 else 0
+            valid_projects = [
+                p for p in analysis.get('project_insights', [])
+                if p.get('relevance') == 'Direct'
+                ]
+
+            p_score = min(10, len(valid_projects) * 3)
+            d_score = 8 if not_met_count == 0 else max(2, 8 - (not_met_count * 2))
+
+            # --- PROPORTIONAL FAIRNESS MATH ---
+            # Calculate score based on percentage of mandatory skills met
+            if mandatory_count > 0:
+                met_count = mandatory_count - not_met_count
+                match_percentage = (met_count / mandatory_count) * 10
+                calculated_score = round(match_percentage)
+            else:
+                calculated_score = 0
+
+            # --- SMART HARD CAP ---
+            # Only collapse the score if they miss MORE than 50% of mandatory skills
+            if mandatory_count > 0 and (not_met_count / mandatory_count) > 0.5:
+                has_any_match = any(req.get('status') == 'met' for req in requirements)
+                if has_any_match:
+                    calculated_score = min(calculated_score, 2) # Limit to 2 if they are a domain mismatch
+                else:
+                    calculated_score = 0
+            
+            analysis['score'] = max(0, min(10, calculated_score))
+            analysis['scoring_breakdown'] = {
+                "mandatory_score": f"{m_score}/10",
+                "projects_score": f"{p_score}/10",
+                "depth_score": f"{d_score}/10",
+                "logic_explanation": f"Score of {analysis['score']} based on {not_met_count} missing requirements (Truth-Checked)."
+            }
+            
+            try:
+                score_val = int(analysis.get('score', 0))
+                if score_val >= 7:
+                    extracted_name = analysis.get('candidate_name', 'Unknown')
+                    if extracted_name == original_filename: extracted_name = "Unknown_Candidate"
+                    c_name = secure_filename(extracted_name).replace(' ', '_')
+                    c_email = secure_filename(analysis.get('email', 'no_email')).replace(' ', '_')
+                    c_role = secure_filename(analysis.get('target_role', 'Job_Role')).replace(' ', '_')
+                    ext = os.path.splitext(original_filename)[1]
+                    new_filename = f"{c_name}_{c_email}_{c_role}{ext}"
+                    final_destination = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
+                    if os.path.exists(final_destination):
+                        final_destination = os.path.join(app.config['UPLOAD_FOLDER'], f"{unique_id}_{new_filename}")
+                    os.rename(temp_path, final_destination)
+                else:
+                    if os.path.exists(temp_path): os.remove(temp_path)
+            except:
+                if os.path.exists(temp_path): os.remove(temp_path)
+
+            return analysis
+        except Exception as e:
+            if 'temp_path' in locals() and os.path.exists(temp_path): os.remove(temp_path)
+            return {"candidate_name": resume.filename, "score": 0, "summary": "Error processing."}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        results = list(executor.map(process_resume, resumes))
+    
+    final_results = [r for r in results if r is not None]
+    return jsonify(final_results)
+
+@app.route('/api/source', methods=['POST'])
+def source():
+    if 'jd' not in request.form: return jsonify({"error": "Missing JD"}), 400
+    jd = request.form['jd']
+    page_num = int(request.form.get('page', 1))
+    keywords = sourcing_agent.get_search_keywords(jd)
+    try:
+        raw_leads = asyncio.run(sourcing_agent.perform_authenticated_search(
+            keywords['boolean_query'], 
+            min_exp=keywords.get('min_exp', 2), 
+            max_exp=keywords.get('max_exp', 8),
+            page_num=page_num
+        ))
+    except: raw_leads = []
+    
+    def analyze_lead(lead):
+        prompt = f"""
+            Analyze this profile against the JD.
+
+            JD:
+            {jd}
+
+            Candidate:
+            {lead['name']}
+
+            Context:
+            {lead['context']}
+
+            Return STRICT JSON:
+            {{
+                "match_percentage": number,
+                "matched_skills": ["skill1", "skill2"],
+                "context_evidence": "short explanation"
+            }}
+        """
+        for attempt in range(3):
+            try:
+                payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False, "format": "json"}
+                response = requests.post(OLLAMA_API_URL, json=payload, timeout=90)
+                response.raise_for_status()
+                analysis = json.loads(response.json().get('response'))
+                lead.update(analysis)
+                return lead
+            except Exception as e:
+                print(f"Ollama analyze_lead attempt {attempt + 1} failed: {e}")
+                if attempt == 2:
+                    lead.update({
+                        "match_percentage": 50,
+                        "matched_skills": [],
+                        "context_evidence": "Analysis failed"
+                    })
+                import time
+                time.sleep(1)
+        return lead
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        analyzed_leads = list(executor.map(analyze_lead, raw_leads))
+    
+    return jsonify({
+        "keywords_used": keywords.get("primary_keywords", []),
+        "boolean_query": keywords.get("boolean_query", ""),
+        "search_url": "https://resdex.naukri.com/v3",
+        "simulated_leads": analyzed_leads
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5001, debug=True)

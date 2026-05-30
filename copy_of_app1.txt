@@ -1,0 +1,2252 @@
+import os
+import re
+import json
+import ollama
+from flask import Flask, request, jsonify, render_template
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+import PyPDF2
+import io
+
+app = Flask(__name__)
+
+executor = ThreadPoolExecutor(max_workers=5)
+
+def call_ollama(prompt):
+    """Wrapper to call Ollama chat."""
+    try:
+        response = ollama.chat(
+            model='llama3:latest',
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        return response['message']['content']
+    except Exception as e:
+        print(f"Ollama Error: {e}")
+        return ""
+
+def extract_json(text):
+    """Surgically extract the first valid JSON object by counting braces and repairing if needed."""
+    if not text: return None
+    
+    # Pre-repair: If it ends abruptly, try to close it
+    text = text.strip()
+    if not text.endswith('}'):
+        # Primitive repair: add closing braces
+        text += ' } } }'
+
+    start = text.find('{')
+    if start == -1: return None
+    
+    count = 0
+    for i in range(start, len(text)):
+        if text[i] == '{': count += 1
+        elif text[i] == '}': count -= 1
+        
+        if count == 0:
+            try:
+                return json.loads(text[start:i+1])
+            except:
+                pass
+    
+    # If brace counting failed, try a greedy regex as a last resort
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        try: return json.loads(match.group(0))
+        except: return None
+        
+    return None
+
+JSON_SCHEMA_PROMPT = """
+    Return ONLY valid JSON in this structure:
+    {
+      "candidate_name": "Full Name",
+      "email": "Email Address",
+      "total_years_experience": number,
+      "evidence_blocks": [
+        {
+          "title": "Project Name or Job Title",
+          "context": "Company or Role",
+          "start_date": "MM/YYYY",
+          "end_date": "MM/YYYY",
+          "description": "Full technical details and achievements",
+          "technical_context": ["Skill1", "Skill2"]
+        }
+      ]
+    }
+
+    STRICT RULES:
+    1. Extract ALL technical projects.
+    2. Use MM/YYYY dates.
+    3. Return ONLY valid JSON. No text.
+"""
+
+def extract_resume_structure(resume_text):
+    prompt = f"""
+    Analyze this resume and extract technical evidence.
+    
+    {JSON_SCHEMA_PROMPT}
+
+    Resume:
+    {resume_text}
+    """
+    raw = call_ollama(prompt)
+    print("DEBUG: RAW RESUME OUTPUT:", raw[:500] + "...")
+    data = extract_json(raw)
+    
+    if not data:
+        return {"evidence_blocks": []}
+
+    # Indestructible Logic: If the keys are wrong but there's a list, use it
+    if not get_all_blocks(data):
+        for val in data.values():
+            if isinstance(val, list) and len(val) > 0:
+                data['evidence_blocks'] = val
+                return data
+                
+    return data
+
+def extract_jd_structure(jd_text):
+    prompt = f"""
+    Extract technical requirements from this JD.
+    
+    STRICT RULES:
+    1. 'keywords' MUST be a list of ATOMIC technical terms (e.g., ["C++", "RTOS"]).
+    2. NEVER include sentences.
+    3. Return ONLY raw JSON.
+
+    JSON FORMAT:
+    {{
+      "requirements": [
+        {{
+          "display_name": "short title",
+          "keywords": [],
+          "mandatory": true
+        }}
+      ]
+    }}
+
+    JD:
+    {jd_text}
+    """
+    raw = call_ollama(prompt)
+    print("DEBUG: RAW JD OUTPUT:", raw[:500] + "...")
+    data = extract_json(raw)
+    
+    if not data or not data.get('requirements'):
+        # Safety Fallback
+        return {
+            "requirements": [
+                {"display_name": "C++", "keywords": ["C++"], "mandatory": True},
+                {"display_name": "Embedded C", "keywords": ["Embedded C"], "mandatory": True},
+                {"display_name": "RTOS", "keywords": ["RTOS"], "mandatory": True}
+            ]
+        }
+    return data
+def get_meaningful_summary(resume_text):
+    """Generate a 2-3 line professional executive summary."""
+    prompt = f"STRICTLY return ONLY 2-3 lines of professional summary for this candidate. DO NOT include any introductory text, titles, or conversational filler. Start directly with the candidate's name or background.\n\nResume:\n{resume_text[:4000]}"
+    summary = call_ollama(prompt).strip()
+    # Deep Clean: Remove any line that mentions "summary" or "lines" at the start
+    lines = summary.split('\n')
+    cleaned_lines = []
+    for l in lines:
+        l = l.strip()
+        if not l: continue
+        # If the line looks like an introduction, skip it
+        if re.search(r'^(here is|summary|professional|2-3 line|executive)', l, re.IGNORECASE):
+            if ':' in l: 
+                l = l.split(':', 1)[1].strip()
+            else:
+                continue # Skip the line entirely if it's just a title
+        if l: cleaned_lines.append(l)
+    
+    final = " ".join(cleaned_lines)
+    # Final safety strip
+    final = re.sub(r'^(summary|executive summary|candidate summary)[:\s-]*', '', final, flags=re.IGNORECASE).strip()
+    return final.split("Let me know")[0].strip()
+
+def get_dedicated_projects(resume_text):
+    """Specifically extract only the technical projects."""
+    prompt = f"Extract every single technical project from this resume. For each project, return: \n1. Project Name\n2. 2-line description\n\nReturn as JSON: {{\"projects\": [{{\"name\": \"\", \"desc\": \"\"}}]}}\n\nResume:\n{resume_text}"
+    raw = call_ollama(prompt)
+    data = extract_json(raw)
+    return data.get('projects', []) if data else []
+
+def extract_text_from_docx(file_path):
+    try:
+        return docx2txt.process(file_path)
+    except Exception as e:
+        # Fallback: Try reading as plain text in case it's a mislabeled .txt file
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
+        except:
+            raise e
+
+def get_all_blocks(structured_resume):
+    """Universal helper to combine ALL evidence blocks into a single timeline."""
+    if not isinstance(structured_resume, dict): return []
+    combined = []
+    target_keys = ['evidence_blocks', 'projects', 'project_blocks', 'experience_blocks', 'employment_history', 'work_experience', 'evidenceblocks', 'EvidenceBlocks']
+    for k, v in structured_resume.items():
+        if k.lower() in target_keys and isinstance(v, list): combined.extend(v)
+    if not combined:
+        for val in structured_resume.values():
+            if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict): combined.extend(val)
+    return combined
+
+def calculate_skill_experience(structured_resume, jd_keywords, raw_text="", filename=""):
+    total_months = 0
+    current_date = datetime.now()
+
+    # Deduplicate overlapping date ranges to get REAL experience
+    jd_keywords_clean = [re.sub(r'[^\w\s\+\#\.]', '', k.lower().strip()) for k in jd_keywords]
+    intervals = []
+    
+    blocks = get_all_blocks(structured_resume)
+    for block in blocks:
+        if not isinstance(block, dict): continue
+        # 1. Block-Specific Text Assembly (Exhaustive & Crash-Proof)
+        description = block.get('description') or block.get('summary') or block.get('details') or ""
+        title = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+        tech_context = block.get('technical_context')
+        tech_list = tech_context if isinstance(tech_context, list) else []
+        tech_str = " ".join([str(t) for t in tech_list if t])
+        block_raw = " ".join([str(title), str(description), tech_str]).lower()
+        
+        # 2. Block-Level Matching (Lenient & Smart)
+        matched = False
+        for kw in jd_keywords_clean:
+            kw_clean = kw.lower().strip()
+            if kw_clean in block_raw: matched = True; break
+            kw_words = [w.strip() for w in kw_clean.split() if len(w) >= 2 and w not in ["proficiency", "knowledge", "experience"]]
+            if kw_words and any(w in block_raw for w in kw_words): matched = True; break
+        
+        if not matched: continue
+
+        # 3. DATE EXTRACTION & SCAVENGING
+        start_str = str(block.get('start_date', '')).strip()
+        end_str = str(block.get('end_date', '')).strip()
+        
+        if not start_str or start_str.lower() in ["unknown", "", "null"]:
+            date_p = r'(?:\d{1,2}[/-]\d{4}|[A-Z][a-z]{2,8}\s+\d{4}|\d{4})'
+            scan_text = str(block).lower()
+            d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', scan_text, re.IGNORECASE)
+            if d_match: start_str, end_str = d_match.groups()
+            else:
+                num_match = re.search(r'(\d{1,2})[/-](\d{4})', scan_text)
+                if num_match: start_str, end_str = num_match.group(0), "Present"
+        
+        if not start_str or start_str.lower() in ["unknown", "", "null"]: continue
+
+        # 4. Normalize & Parse Math
+        def clean_d(s):
+            s = s.lower().replace('.', '').replace(',', '').strip()
+            return re.sub(r'sept', 'sep', s)
+            
+        s_val = clean_d(start_str)
+        e_val = clean_d(end_str)
+
+        try:
+            def parse_direct(val_str):
+                c_v = re.sub(r'\s+', '', str(val_str)).lower()
+                m1 = re.search(r'(\d{1,2})[/-](\d{4})', c_v)
+                if m1: return datetime(int(m1.group(2)), int(m1.group(1)), 1)
+                m2 = re.search(r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)', val_str.lower())
+                y2 = re.search(r'(\d{4})', val_str)
+                if m2 and y2:
+                    months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
+                    return datetime(int(y2.group(1)), months.index(m2.group(1)) + 1, 1)
+                y3 = re.search(r'(\d{4})', val_str)
+                if y3: return datetime(int(y3.group(1)), 1, 1)
+                return None
+
+            s_date = parse_direct(s_val)
+            if not s_date: continue
+            e_date = current_date
+            if e_val not in ["present", "current", "now", "till date", "unknown"]:
+                parsed_e = parse_direct(e_val)
+                if parsed_e: e_date = parsed_e
+            intervals.append((s_date, e_date))
+        except: continue
+
+    if not intervals: return 0
+    intervals.sort()
+    merged = []
+    if intervals:
+        curr_s, curr_e = intervals[0]
+        for n_s, n_e in intervals[1:]:
+            if n_s <= curr_e: curr_e = max(curr_e, n_e)
+            else: merged.append((curr_s, curr_e)); curr_s, curr_e = n_s, n_e
+        merged.append((curr_s, curr_e))
+
+    total_months = 0
+    for s, e in merged: total_months += (e.year - s.year) * 12 + (e.month - s.month)
+    return round(max(total_months, 0) / 12, 1)
+
+
+def match_requirements(structured_resume, structured_jd, raw_text="", filename=""):
+    results = []
+    
+    # Use the combined, date-updated blocks from structured_resume
+    all_blocks = get_all_blocks(structured_resume)
+    
+    # Merge all project text into one pool for better matching
+    full_candidate_text = ""
+    for block in all_blocks:
+        if not isinstance(block, dict): continue
+        desc = block.get('description') or block.get('summary') or block.get('details') or ""
+        title = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+        tech_context = block.get('technical_context')
+        tech_list = tech_context if isinstance(tech_context, list) else []
+        tech_str = " ".join([str(t) for t in tech_list if t])
+        
+        block_full_text = " ".join([str(title), str(desc), tech_str]).lower()
+        if any(x in block_full_text for x in ["qnx", "freertos", "micrium", "vxworks", "threadx"]):
+            block_full_text += " rtos real-time operating system "
+            
+        project_text = re.sub(r'[^\w\s\+\#\.]', '', block_full_text)
+        full_candidate_text += project_text + " "
+
+    for req in structured_jd.get('requirements', []):
+        display_name = req.get('display_name') or req.get('keywords', ['Unknown'])[0]
+        keywords = [k.lower().strip() for k in req.get('keywords', [])]
+        category = req.get('category', '')
+        status = 'not_met'
+        evidence = ''
+        
+        # Search for JD keywords across the entire candidate pool (all projects)
+        fluff = ["strong", "proficiency", "knowledge", "of", "experience", "with", "working", "basic", "hands-on", "expertise", "in"]
+        clean_keywords = []
+        for k in keywords:
+            words = [w for w in k.split() if w not in fluff and len(w) > 1]
+            if words: clean_keywords.append(" ".join(words))
+            else: clean_keywords.append(k)
+
+        for kw in clean_keywords:
+            kw_low = kw.lower()
+            # Support special symbols in matching (C++, C#, .NET)
+            kw_regex = re.escape(kw_low).replace(r'\+', r'\+').replace(r'\#', r'\#')
+            
+            if re.search(r'\b' + kw_regex + r'\b', full_candidate_text.lower()) or kw_low in full_candidate_text.lower():
+                status = 'met'
+                break
+            
+            # Word-by-word overlap for long requirements
+            kw_words = [w for w in kw_low.split() if len(w) >= 2 and w not in fluff]
+            if kw_words and all(re.search(r'\b' + re.escape(w) + r'\b', full_candidate_text.lower()) for w in kw_words[:2]):
+                status = 'met'
+                break
+
+        # EXPERIENCE CALCULATION
+        exp = 0
+        if status == 'met':
+            exp = calculate_skill_experience(structured_resume, keywords, raw_text, filename)
+
+        # EVIDENCE EXTRACTION
+        if status == 'met':
+            for block in get_all_blocks(structured_resume):
+                if not isinstance(block, dict): continue
+                tech_list = block.get('technical_context', [])
+                if not isinstance(tech_list, list): tech_list = []
+                
+                # Block-Specific Evidence Check
+                desc_ev = block.get('description') or block.get('summary') or block.get('details') or ""
+                title_ev = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+                block_ev_text = " ".join([str(title_ev), str(desc_ev)]).lower()
+                
+                project_text = re.sub(r'[^\w\s\+\#\.]', '', block_ev_text)
+                
+                matched_kw = None
+                for kw in keywords:
+                    kw_low = kw.lower()
+                    kw_clean = re.sub(r'[^\w\s\+\#\.]', '', kw_low)
+                    kw_singular = kw_clean[:-1] if kw_clean.endswith('s') and len(kw_clean) > 3 else kw_clean
+                    if kw_clean in project_text or kw_singular in project_text:
+                        matched_kw = kw
+                        break
+                
+                if matched_kw:
+                    full_desc = block.get('description') or block.get('summary_of_work') or block.get('summary') or ""
+                    
+                    # Extreme Truncation: Max 1 sentence and 150 chars
+                    sentences = re.split(r'(?<=[.!?])\s+', full_desc)
+                    relevant_sentence = ""
+                    kw_clean_match = re.sub(r'[^\w\s\+\#\.]', '', matched_kw.lower())
+                    
+                    for s in sentences:
+                        if kw_clean_match in re.sub(r'[^\w\s\+\#\.]', '', s.lower()):
+                            relevant_sentence = s.strip()
+                            break
+                    
+                    final_text = relevant_sentence if relevant_sentence else full_desc
+                    if len(final_text) > 150:
+                        # Find the keyword and take context around it
+                        idx = final_text.lower().find(kw_clean_match)
+                        if idx != -1:
+                            start_idx = max(0, idx - 60)
+                            end_idx = min(len(final_text), idx + 90)
+                            final_text = ("..." if start_idx > 0 else "") + final_text[start_idx:end_idx] + ("..." if end_idx < len(final_text) else "")
+                        else:
+                            final_text = final_text[:147] + "..."
+                    
+                    evidence = final_text
+                    break
+
+        results.append({
+            "requirement": display_name,
+            "status": status,
+            "years_of_experience": exp,
+            "evidence_lines": evidence,
+            "category": category,
+            "is_mandatory": req.get('mandatory', True)
+        })
+
+    return results
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/api/analyze', methods=['POST'])
+def analyze():
+    try:
+        jd_text = request.form.get('jd', '')
+        files = request.files.getlist('resumes')
+
+        if not jd_text or not files:
+            return jsonify({"error": "Missing JD or resumes"}), 400
+
+        # STEP 1 — Extract JD Requirements (Atomic)
+        structured_jd = extract_jd_structure(jd_text)
+        print("DEBUG: STRUCTURED JD:", json.dumps(structured_jd, indent=2))
+
+        analysis_results = []
+
+        for file in files:
+            try:
+                filename = file.filename.lower()
+                resume_text = ""
+                
+                if filename.endswith('.pdf'):
+                    # PDF Extraction
+                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
+                    for page in pdf_reader.pages:
+                        resume_text += page.extract_text() + "\n"
+                elif filename.endswith('.docx'):
+                    # DOCX Extraction
+                    import docx2txt
+                    temp_path = f"temp_{file.filename}"
+                    file.save(temp_path)
+                    resume_text = docx2txt.process(temp_path)
+                    import os
+                    os.remove(temp_path)
+                else:
+                    # Plain Text Fallback
+                    resume_text = file.read().decode('utf-8', errors='ignore')
+
+                # Smart truncation
+                if len(resume_text) > 12000:
+                    resume_text = resume_text[:6000] + "\n...[TRUNCATED]...\n" + resume_text[-6000:]
+
+                # STEP 2 — Structured Resume Extraction
+                structured_resume = extract_resume_structure(resume_text)
+                structured_resume['raw_text'] = resume_text
+                
+                # REFINEMENT: Get Meaningful Summary & Dedicated Projects
+                meaningful_summary = get_meaningful_summary(resume_text)
+                structured_resume['ai_summary'] = meaningful_summary
+                
+                # Date Inheritance & Professional Timeline Scavenger
+                all_blocks = get_all_blocks(structured_resume)
+                
+                # Universal Date Pattern (Supports MM/YYYY, Month YYYY, YYYY)
+                date_p = r'(?:\d{1,2}[/-]\d{4}|[A-Z][a-z]{2,8}\s+\d{4}|\d{4})'
+                
+                # First Pass: Capture all JOB dates (Skip Education)
+                job_dates = []
+                for b in all_blocks:
+                    if not isinstance(b, dict): continue
+                    title = str(b.get('title') or b.get('role_title') or "").lower()
+                    context = str(b.get('context') or b.get('name') or "").lower()
+                    is_edu = any(x in title or x in context for x in ["university", "college", "school", "bachelor", "master", "diploma", "be", "b.e", "m.e", "cdac"])
+                    
+                    d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', str(b), re.IGNORECASE)
+                    if d_match and not is_edu:
+                        s_val, e_val = d_match.groups()
+                        job_dates.append((s_val, e_val))
+                
+                # Second Pass: Apply dates to all blocks (Inherit from closest job)
+                default_s, default_e = job_dates[0] if job_dates else ("Unknown", "Present")
+                current_s, current_e = default_s, default_e
+                
+                for b in all_blocks:
+                    if not isinstance(b, dict): continue
+                    d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', str(b), re.IGNORECASE)
+                    if d_match:
+                        current_s, current_e = d_match.groups()
+                        b['start_date'], b['end_date'] = current_s, current_e
+                    else:
+                        b['start_date'], b['end_date'] = current_s, current_e
+                
+                # Add a Global Skills block to ensure 100% matching
+                all_blocks.append({
+                    "project_name": "Global Skills Pool",
+                    "description": resume_text,
+                    "start_date": "Unknown",
+                    "end_date": "Present"
+                })
+
+                if len(all_blocks) < 3:
+                    print("DEBUG: Low block count. Running Dedicated Extraction.")
+                    dedicated_projs = get_dedicated_projects(resume_text)
+                    for p in dedicated_projs:
+                        all_blocks.append({
+                            "project_name": p.get('name', 'Project'),
+                            "description": p.get('desc', ''),
+                            "start_date": current_s,
+                            "end_date": current_e,
+                            "is_pure_project": True
+                        })
+                
+                structured_resume['evidence_blocks'] = all_blocks
+
+                # STEP 3 — Deterministic Matching
+                requirements_analysis = match_requirements(
+                    structured_resume, 
+                    structured_jd,
+                    resume_text,
+                    file.filename
+                )
+
+                # Scoring
+                mandatory = [r for r in requirements_analysis if r['is_mandatory']]
+                met_mandatory = [r for r in mandatimport os
+import re
+import json
+import ollama
+from flask import Flask, request, jsonify, render_template
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+import PyPDF2
+import io
+
+app = Flask(__name__)
+
+executor = ThreadPoolExecutor(max_workers=5)
+
+def call_ollama(prompt):
+    """Wrapper to call Ollama chat."""
+    try:
+        response = ollama.chat(
+            model='llama3:latest',
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        return response['message']['content']
+    except Exception as e:
+        print(f"Ollama Error: {e}")
+        return ""
+
+def extract_json(text):
+    """Surgically extract the first valid JSON object by counting braces and repairing if needed."""
+    if not text: return None
+    
+    # Pre-repair: If it ends abruptly, try to close it
+    text = text.strip()
+    if not text.endswith('}'):
+        # Primitive repair: add closing braces
+        text += ' } } }'
+
+    start = text.find('{')
+    if start == -1: return None
+    
+    count = 0
+    for i in range(start, len(text)):
+        if text[i] == '{': count += 1
+        elif text[i] == '}': count -= 1
+        
+        if count == 0:
+            try:
+                return json.loads(text[start:i+1])
+            except:
+                pass
+    
+    # If brace counting failed, try a greedy regex as a last resort
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        try: return json.loads(match.group(0))
+        except: return None
+        
+    return None
+
+JSON_SCHEMA_PROMPT = """
+    Return ONLY valid JSON in this structure:
+    {
+      "candidate_name": "Full Name",
+      "email": "Email Address",
+      "total_years_experience": number,
+      "evidence_blocks": [
+        {
+          "title": "Project Name or Job Title",
+          "context": "Company or Role",
+          "start_date": "MM/YYYY",
+          "end_date": "MM/YYYY",
+          "description": "Full technical details and achievements",
+          "technical_context": ["Skill1", "Skill2"]
+        }
+      ]
+    }
+
+    STRICT RULES:
+    1. Extract ALL technical projects.
+    2. Use MM/YYYY dates.
+    3. Return ONLY valid JSON. No text.
+"""
+
+def extract_resume_structure(resume_text):
+    prompt = f"""
+    Analyze this resume and extract technical evidence.
+    
+    {JSON_SCHEMA_PROMPT}
+
+    Resume:
+    {resume_text}
+    """
+    raw = call_ollama(prompt)
+    print("DEBUG: RAW RESUME OUTPUT:", raw[:500] + "...")
+    data = extract_json(raw)
+    
+    if not data:
+        return {"evidence_blocks": []}
+
+    # Indestructible Logic: If the keys are wrong but there's a list, use it
+    if not get_all_blocks(data):
+        for val in data.values():
+            if isinstance(val, list) and len(val) > 0:
+                data['evidence_blocks'] = val
+                return data
+                
+    return data
+
+def extract_jd_structure(jd_text):
+    prompt = f"""
+    Extract technical requirements from this JD.
+    
+    STRICT RULES:
+    1. 'keywords' MUST be a list of ATOMIC technical terms (e.g., ["C++", "RTOS"]).
+    2. NEVER include sentences.
+    3. Return ONLY raw JSON.
+
+    JSON FORMAT:
+    {{
+      "requirements": [
+        {{
+          "display_name": "short title",
+          "keywords": [],
+          "mandatory": true
+        }}
+      ]
+    }}
+
+    JD:
+    {jd_text}
+    """
+    raw = call_ollama(prompt)
+    print("DEBUG: RAW JD OUTPUT:", raw[:500] + "...")
+    data = extract_json(raw)
+    
+    if not data or not data.get('requirements'):
+        # Safety Fallback
+        return {
+            "requirements": [
+                {"display_name": "C++", "keywords": ["C++"], "mandatory": True},
+                {"display_name": "Embedded C", "keywords": ["Embedded C"], "mandatory": True},
+                {"display_name": "RTOS", "keywords": ["RTOS"], "mandatory": True}
+            ]
+        }
+    return data
+def get_meaningful_summary(resume_text):
+    """Generate a 2-3 line professional executive summary."""
+    prompt = f"STRICTLY return ONLY 2-3 lines of professional summary for this candidate. DO NOT include any introductory text, titles, or conversational filler. Start directly with the candidate's name or background.\n\nResume:\n{resume_text[:4000]}"
+    summary = call_ollama(prompt).strip()
+    # Deep Clean: Remove any line that mentions "summary" or "lines" at the start
+    lines = summary.split('\n')
+    cleaned_lines = []
+    for l in lines:
+        l = l.strip()
+        if not l: continue
+        # If the line looks like an introduction, skip it
+        if re.search(r'^(here is|summary|professional|2-3 line|executive)', l, re.IGNORECASE):
+            if ':' in l: 
+                l = l.split(':', 1)[1].strip()
+            else:
+                continue # Skip the line entirely if it's just a title
+        if l: cleaned_lines.append(l)
+    
+    final = " ".join(cleaned_lines)
+    # Final safety strip
+    final = re.sub(r'^(summary|executive summary|candidate summary)[:\s-]*', '', final, flags=re.IGNORECASE).strip()
+    return final.split("Let me know")[0].strip()
+
+def get_dedicated_projects(resume_text):
+    """Specifically extract only the technical projects."""
+    prompt = f"Extract every single technical project from this resume. For each project, return: \n1. Project Name\n2. 2-line description\n\nReturn as JSON: {{\"projects\": [{{\"name\": \"\", \"desc\": \"\"}}]}}\n\nResume:\n{resume_text}"
+    raw = call_ollama(prompt)
+    data = extract_json(raw)
+    return data.get('projects', []) if data else []
+
+def extract_text_from_docx(file_path):
+    try:
+        return docx2txt.process(file_path)
+    except Exception as e:
+        # Fallback: Try reading as plain text in case it's a mislabeled .txt file
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
+        except:
+            raise e
+
+def get_all_blocks(structured_resume):
+    """Universal helper to combine ALL evidence blocks into a single timeline."""
+    if not isinstance(structured_resume, dict): return []
+    combined = []
+    target_keys = ['evidence_blocks', 'projects', 'project_blocks', 'experience_blocks', 'employment_history', 'work_experience', 'evidenceblocks', 'EvidenceBlocks']
+    for k, v in structured_resume.items():
+        if k.lower() in target_keys and isinstance(v, list): combined.extend(v)
+    if not combined:
+        for val in structured_resume.values():
+            if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict): combined.extend(val)
+    return combined
+
+def calculate_skill_experience(structured_resume, jd_keywords, raw_text="", filename=""):
+    total_months = 0
+    current_date = datetime.now()
+
+    # Deduplicate overlapping date ranges to get REAL experience
+    jd_keywords_clean = [re.sub(r'[^\w\s\+\#\.]', '', k.lower().strip()) for k in jd_keywords]
+    intervals = []
+    
+    blocks = get_all_blocks(structured_resume)
+    for block in blocks:
+        if not isinstance(block, dict): continue
+        # 1. Block-Specific Text Assembly (Exhaustive & Crash-Proof)
+        description = block.get('description') or block.get('summary') or block.get('details') or ""
+        title = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+        tech_context = block.get('technical_context')
+        tech_list = tech_context if isinstance(tech_context, list) else []
+        tech_str = " ".join([str(t) for t in tech_list if t])
+        block_raw = " ".join([str(title), str(description), tech_str]).lower()
+        
+        # 2. Block-Level Matching (Lenient & Smart)
+        matched = False
+        for kw in jd_keywords_clean:
+            kw_clean = kw.lower().strip()
+            if kw_clean in block_raw: matched = True; break
+            kw_words = [w.strip() for w in kw_clean.split() if len(w) >= 2 and w not in ["proficiency", "knowledge", "experience"]]
+            if kw_words and any(w in block_raw for w in kw_words): matched = True; break
+        
+        if not matched: continue
+
+        # 3. DATE EXTRACTION & SCAVENGING
+        start_str = str(block.get('start_date', '')).strip()
+        end_str = str(block.get('end_date', '')).strip()
+        
+        if not start_str or start_str.lower() in ["unknown", "", "null"]:
+            date_p = r'(?:\d{1,2}[/-]\d{4}|[A-Z][a-z]{2,8}\s+\d{4}|\d{4})'
+            scan_text = str(block).lower()
+            d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', scan_text, re.IGNORECASE)
+            if d_match: start_str, end_str = d_match.groups()
+            else:
+                num_match = re.search(r'(\d{1,2})[/-](\d{4})', scan_text)
+                if num_match: start_str, end_str = num_match.group(0), "Present"
+        
+        if not start_str or start_str.lower() in ["unknown", "", "null"]: continue
+
+        # 4. Normalize & Parse Math
+        def clean_d(s):
+            s = s.lower().replace('.', '').replace(',', '').strip()
+            return re.sub(r'sept', 'sep', s)
+            
+        s_val = clean_d(start_str)
+        e_val = clean_d(end_str)
+
+        try:
+            def parse_direct(val_str):
+                c_v = re.sub(r'\s+', '', str(val_str)).lower()
+                m1 = re.search(r'(\d{1,2})[/-](\d{4})', c_v)
+                if m1: return datetime(int(m1.group(2)), int(m1.group(1)), 1)
+                m2 = re.search(r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)', val_str.lower())
+                y2 = re.search(r'(\d{4})', val_str)
+                if m2 and y2:
+                    months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
+                    return datetime(int(y2.group(1)), months.index(m2.group(1)) + 1, 1)
+                y3 = re.search(r'(\d{4})', val_str)
+                if y3: return datetime(int(y3.group(1)), 1, 1)
+                return None
+
+            s_date = parse_direct(s_val)
+            if not s_date: continue
+            e_date = current_date
+            if e_val not in ["present", "current", "now", "till date", "unknown"]:
+                parsed_e = parse_direct(e_val)
+                if parsed_e: e_date = parsed_e
+            intervals.append((s_date, e_date))
+        except: continue
+
+    if not intervals: return 0
+    intervals.sort()
+    merged = []
+    if intervals:
+        curr_s, curr_e = intervals[0]
+        for n_s, n_e in intervals[1:]:
+            if n_s <= curr_e: curr_e = max(curr_e, n_e)
+            else: merged.append((curr_s, curr_e)); curr_s, curr_e = n_s, n_e
+        merged.append((curr_s, curr_e))
+
+    total_months = 0
+    for s, e in merged: total_months += (e.year - s.year) * 12 + (e.month - s.month)
+    return round(max(total_months, 0) / 12, 1)
+
+
+def match_requirements(structured_resume, structured_jd, raw_text="", filename=""):
+    results = []
+    
+    # Use the combined, date-updated blocks from structured_resume
+    all_blocks = get_all_blocks(structured_resume)
+    
+    # Merge all project text into one pool for better matching
+    full_candidate_text = ""
+    for block in all_blocks:
+        if not isinstance(block, dict): continue
+        desc = block.get('description') or block.get('summary') or block.get('details') or ""
+        title = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+        tech_context = block.get('technical_context')
+        tech_list = tech_context if isinstance(tech_context, list) else []
+        tech_str = " ".join([str(t) for t in tech_list if t])
+        
+        block_full_text = " ".join([str(title), str(desc), tech_str]).lower()
+        if any(x in block_full_text for x in ["qnx", "freertos", "micrium", "vxworks", "threadx"]):
+            block_full_text += " rtos real-time operating system "
+            
+        project_text = re.sub(r'[^\w\s\+\#\.]', '', block_full_text)
+        full_candidate_text += project_text + " "
+
+    for req in structured_jd.get('requirements', []):
+        display_name = req.get('display_name') or req.get('keywords', ['Unknown'])[0]
+        keywords = [k.lower().strip() for k in req.get('keywords', [])]
+        category = req.get('category', '')
+        status = 'not_met'
+        evidence = ''
+        
+        # Search for JD keywords across the entire candidate pool (all projects)
+        fluff = ["strong", "proficiency", "knowledge", "of", "experience", "with", "working", "basic", "hands-on", "expertise", "in"]
+        clean_keywords = []
+        for k in keywords:
+            words = [w for w in k.split() if w not in fluff and len(w) > 1]
+            if words: clean_keywords.append(" ".join(words))
+            else: clean_keywords.append(k)
+
+        for kw in clean_keywords:
+            kw_low = kw.lower()
+            # Support special symbols in matching (C++, C#, .NET)
+            kw_regex = re.escape(kw_low).replace(r'\+', r'\+').replace(r'\#', r'\#')
+            
+            if re.search(r'\b' + kw_regex + r'\b', full_candidate_text.lower()) or kw_low in full_candidate_text.lower():
+                status = 'met'
+                break
+            
+            # Word-by-word overlap for long requirements
+            kw_words = [w for w in kw_low.split() if len(w) >= 2 and w not in fluff]
+            if kw_words and all(re.search(r'\b' + re.escape(w) + r'\b', full_candidate_text.lower()) for w in kw_words[:2]):
+                status = 'met'
+                break
+
+        # EXPERIENCE CALCULATION
+        exp = 0
+        if status == 'met':
+            exp = calculate_skill_experience(structured_resume, keywords, raw_text, filename)
+
+        # EVIDENCE EXTRACTION
+        if status == 'met':
+            for block in get_all_blocks(structured_resume):
+                if not isinstance(block, dict): continue
+                tech_list = block.get('technical_context', [])
+                if not isinstance(tech_list, list): tech_list = []
+                
+                # Block-Specific Evidence Check
+                desc_ev = block.get('description') or block.get('summary') or block.get('details') or ""
+                title_ev = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+                block_ev_text = " ".join([str(title_ev), str(desc_ev)]).lower()
+                
+                project_text = re.sub(r'[^\w\s\+\#\.]', '', block_ev_text)
+                
+                matched_kw = None
+                for kw in keywords:
+                    kw_low = kw.lower()
+                    kw_clean = re.sub(r'[^\w\s\+\#\.]', '', kw_low)
+                    kw_singular = kw_clean[:-1] if kw_clean.endswith('s') and len(kw_clean) > 3 else kw_clean
+                    if kw_clean in project_text or kw_singular in project_text:
+                        matched_kw = kw
+                        break
+                
+                if matched_kw:
+                    full_desc = block.get('description') or block.get('summary_of_work') or block.get('summary') or ""
+                    
+                    # Extreme Truncation: Max 1 sentence and 150 chars
+                    sentences = re.split(r'(?<=[.!?])\s+', full_desc)
+                    relevant_sentence = ""
+                    kw_clean_match = re.sub(r'[^\w\s\+\#\.]', '', matched_kw.lower())
+                    
+                    for s in sentences:
+                        if kw_clean_match in re.sub(r'[^\w\s\+\#\.]', '', s.lower()):
+                            relevant_sentence = s.strip()
+                            break
+                    
+                    final_text = relevant_sentence if relevant_sentence else full_desc
+                    if len(final_text) > 150:
+                        # Find the keyword and take context around it
+                        idx = final_text.lower().find(kw_clean_match)
+                        if idx != -1:
+                            start_idx = max(0, idx - 60)
+                            end_idx = min(len(final_text), idx + 90)
+                            final_text = ("..." if start_idx > 0 else "") + final_text[start_idx:end_idx] + ("..." if end_idx < len(final_text) else "")
+                        else:
+                            final_text = final_text[:147] + "..."
+                    
+                    evidence = final_text
+                    break
+
+        results.append({
+            "requirement": display_name,
+            "status": status,
+            "years_of_experience": exp,
+            "evidence_lines": evidence,
+            "category": category,
+            "is_mandatory": req.get('mandatory', True)
+        })
+
+    return results
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/api/analyze', methods=['POST'])
+def analyze():
+    try:
+        jd_text = request.form.get('jd', '')
+        files = request.files.getlist('resumes')
+
+        if not jd_text or not files:
+            return jsonify({"error": "Missing JD or resumes"}), 400
+
+        # STEP 1 — Extract JD Requirements (Atomic)
+        structured_jd = extract_jd_structure(jd_text)
+        print("DEBUG: STRUCTURED JD:", json.dumps(structured_jd, indent=2))
+
+        analysis_results = []
+
+        for file in files:
+            try:
+                filename = file.filename.lower()
+                resume_text = ""
+                
+                if filename.endswith('.pdf'):
+                    # PDF Extraction
+                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
+                    for page in pdf_reader.pages:
+                        resume_text += page.extract_text() + "\n"
+                elif filename.endswith('.docx'):
+                    # DOCX Extraction
+                    import docx2txt
+                    temp_path = f"temp_{file.filename}"
+                    file.save(temp_path)
+                    resume_text = docx2txt.process(temp_path)
+                    import os
+                    os.remove(temp_path)
+                else:
+                    # Plain Text Fallback
+                    resume_text = file.read().decode('utf-8', errors='ignore')
+
+                # Smart truncation
+                if len(resume_text) > 12000:
+                    resume_text = resume_text[:6000] + "\n...[TRUNCATED]...\n" + resume_text[-6000:]
+
+                # STEP 2 — Structured Resume Extraction
+                structured_resume = extract_resume_structure(resume_text)
+                structured_resume['raw_text'] = resume_text
+                
+                # REFINEMENT: Get Meaningful Summary & Dedicated Projects
+                meaningful_summary = get_meaningful_summary(resume_text)
+                structured_resume['ai_summary'] = meaningful_summary
+                
+                # Date Inheritance & Professional Timeline Scavenger
+                all_blocks = get_all_blocks(structured_resume)
+                
+                # Universal Date Pattern (Supports MM/YYYY, Month YYYY, YYYY)
+                date_p = r'(?:\d{1,2}[/-]\d{4}|[A-Z][a-z]{2,8}\s+\d{4}|\d{4})'
+                
+                # First Pass: Capture all JOB dates (Skip Education)
+                job_dates = []
+                for b in all_blocks:
+                    if not isinstance(b, dict): continue
+                    title = str(b.get('title') or b.get('role_title') or "").lower()
+                    context = str(b.get('context') or b.get('name') or "").lower()
+                    is_edu = any(x in title or x in context for x in ["university", "college", "school", "bachelor", "master", "diploma", "be", "b.e", "m.e", "cdac"])
+                    
+                    d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', str(b), re.IGNORECASE)
+                    if d_match and not is_edu:
+                        s_val, e_val = d_match.groups()
+                        job_dates.append((s_val, e_val))
+                
+                # Second Pass: Apply dates to all blocks (Inherit from closest job)
+                default_s, default_e = job_dates[0] if job_dates else ("Unknown", "Present")
+                current_s, current_e = default_s, default_e
+                
+                for b in all_blocks:
+                    if not isinstance(b, dict): continue
+                    d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', str(b), re.IGNORECASE)
+                    if d_match:
+                        current_s, current_e = d_match.groups()
+                        b['start_date'], b['end_date'] = current_s, current_e
+                    else:
+                        b['start_date'], b['end_date'] = current_s, current_e
+                
+                # Add a Global Skills block to ensure 100% matching
+                all_blocks.append({
+                    "project_name": "Global Skills Pool",
+                    "description": resume_text,
+                    "start_date": "Unknown",
+                    "end_date": "Present"
+                })
+
+                if len(all_blocks) < 3:
+                    print("DEBUG: Low block count. Running Dedicated Extraction.")
+                    dedicated_projs = get_dedicated_projects(resume_text)
+                    for p in dedicated_projs:
+                        all_blocks.append({
+                            "project_name": p.get('name', 'Project'),
+                            "description": p.get('desc', ''),
+                            "start_date": current_s,
+                            "end_date": current_e,
+                            "is_pure_project": True
+                        })
+                
+                structured_resume['evidence_blocks'] = all_blocks
+
+                # STEP 3 — Deterministic Matching
+                requirements_analysis = match_requirements(
+                    structured_resume, 
+                    structured_jd,
+                    resume_text,
+                    file.filename
+                )
+
+                # Scoring
+                mandatory = [r for r in requirements_analysis if r['is_mandatory']]
+                met_mandatory = [r for r in mandatory if r['status'] == 'met']
+                score = round((len(met_mandatory) / len(mandatory)) * 10, 1) if mandatory else 0
+
+                # Final Data Assembly
+                pure_projects = [b for b in get_all_blocks(structured_resume) if isinstance(b, dict) and b.get('project_name') != "Global Skills Pool"]
+
+                analysis_results.append({
+                    "filename": file.filename,
+                    "candidate_name": structured_resume.get('candidate_name', 'Unknown'),
+                    "score": score,
+                    "summary": meaningful_summary,
+                    "requirements_analysis": requirements_analysis,
+                    "project_insights": [
+                        {
+                            "project_name": b.get('project_name') or b.get('title') or 'Project',
+                            "project_description": (b.get('description') or b.get('summary_of_work') or b.get('summary') or "")[:200] + "..."
+                        } for b in pure_projects[:5] # Max 5 projects for clarity
+                    ],
+                    "scoring_breakdown": {
+                        "mandatory_score": f"{score}/10",
+                        "projects_score": f"{len(pure_projects)} Projects",
+                        "depth_score": f"{max([r['years_of_experience'] for r in requirements_analysis] + [0])}y Peak",
+                        "logic_explanation": "Scoring based on mandatory technical requirements and project evidence."
+                    }
+                })
+            except Exception as e:
+                print(f"Error processing {file.filename}: {e}")
+                analysis_results.append({
+                    "filename": file.filename,
+                    "error": str(e)
+                })
+
+        return jsonify(analysis_results)
+
+    except Exception as e:import os
+import re
+import json
+import ollama
+from flask import Flask, request, jsonify, render_template
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+import PyPDF2
+import io
+
+app = Flask(__name__)
+
+executor = ThreadPoolExecutor(max_workers=5)
+
+def call_ollama(prompt):
+    """Wrapper to call Ollama chat."""
+    try:
+        response = ollama.chat(
+            model='llama3:latest',
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        return response['message']['content']
+    except Exception as e:
+        print(f"Ollama Error: {e}")
+        return ""
+
+def extract_json(text):
+    """Surgically extract the first valid JSON object by counting braces and repairing if needed."""
+    if not text: return None
+    
+    # Pre-repair: If it ends abruptly, try to close it
+    text = text.strip()
+    if not text.endswith('}'):
+        # Primitive repair: add closing braces
+        text += ' } } }'
+
+    start = text.find('{')
+    if start == -1: return None
+    
+    count = 0
+    for i in range(start, len(text)):
+        if text[i] == '{': count += 1
+        elif text[i] == '}': count -= 1
+        
+        if count == 0:
+            try:
+                return json.loads(text[start:i+1])
+            except:
+                pass
+    
+    # If brace counting failed, try a greedy regex as a last resort
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        try: return json.loads(match.group(0))
+        except: return None
+        
+    return None
+
+JSON_SCHEMA_PROMPT = """
+    Return ONLY valid JSON in this structure:
+    {
+      "candidate_name": "Full Name",
+      "email": "Email Address",
+      "total_years_experience": number,
+      "evidence_blocks": [
+        {
+          "title": "Project Name or Job Title",
+          "context": "Company or Role",
+          "start_date": "MM/YYYY",
+          "end_date": "MM/YYYY",
+          "description": "Full technical details and achievements",
+          "technical_context": ["Skill1", "Skill2"]
+        }
+      ]
+    }
+
+    STRICT RULES:
+    1. Extract ALL technical projects.
+    2. Use MM/YYYY dates.
+    3. Return ONLY valid JSON. No text.
+"""
+
+def extract_resume_structure(resume_text):
+    prompt = f"""
+    Analyze this resume and extract technical evidence.
+    
+    {JSON_SCHEMA_PROMPT}
+
+    Resume:
+    {resume_text}
+    """
+    raw = call_ollama(prompt)
+    print("DEBUG: RAW RESUME OUTPUT:", raw[:500] + "...")
+    data = extract_json(raw)
+    
+    if not data:
+        return {"evidence_blocks": []}
+
+    # Indestructible Logic: If the keys are wrong but there's a list, use it
+    if not get_all_blocks(data):
+        for val in data.values():
+            if isinstance(val, list) and len(val) > 0:
+                data['evidence_blocks'] = val
+                return data
+                
+    return data
+
+def extract_jd_structure(jd_text):
+    prompt = f"""
+    Extract technical requirements from this JD.
+    
+    STRICT RULES:
+    1. 'keywords' MUST be a list of ATOMIC technical terms (e.g., ["C++", "RTOS"]).
+    2. NEVER include sentences.
+    3. Return ONLY raw JSON.
+
+    JSON FORMAT:
+    {{
+      "requirements": [
+        {{
+          "display_name": "short title",
+          "keywords": [],
+          "mandatory": true
+        }}
+      ]
+    }}
+
+    JD:
+    {jd_text}
+    """
+    raw = call_ollama(prompt)
+    print("DEBUG: RAW JD OUTPUT:", raw[:500] + "...")
+    data = extract_json(raw)
+    
+    if not data or not data.get('requirements'):
+        # Safety Fallback
+        return {
+            "requirements": [
+                {"display_name": "C++", "keywords": ["C++"], "mandatory": True},
+                {"display_name": "Embedded C", "keywords": ["Embedded C"], "mandatory": True},
+                {"display_name": "RTOS", "keywords": ["RTOS"], "mandatory": True}
+            ]
+        }
+    return data
+def get_meaningful_summary(resume_text):
+    """Generate a 2-3 line professional executive summary."""
+    prompt = f"STRICTLY return ONLY 2-3 lines of professional summary for this candidate. DO NOT include any introductory text, titles, or conversational filler. Start directly with the candidate's name or background.\n\nResume:\n{resume_text[:4000]}"
+    summary = call_ollama(prompt).strip()
+    # Deep Clean: Remove any line that mentions "summary" or "lines" at the start
+    lines = summary.split('\n')
+    cleaned_lines = []
+    for l in lines:
+        l = l.strip()
+        if not l: continue
+        # If the line looks like an introduction, skip it
+        if re.search(r'^(here is|summary|professional|2-3 line|executive)', l, re.IGNORECASE):
+            if ':' in l: 
+                l = l.split(':', 1)[1].strip()
+            else:
+                continue # Skip the line entirely if it's just a title
+        if l: cleaned_lines.append(l)
+    
+    final = " ".join(cleaned_lines)
+    # Final safety strip
+    final = re.sub(r'^(summary|executive summary|candidate summary)[:\s-]*', '', final, flags=re.IGNORECASE).strip()
+    return final.split("Let me know")[0].strip()
+
+def get_dedicated_projects(resume_text):
+    """Specifically extract only the technical projects."""
+    prompt = f"Extract every single technical project from this resume. For each project, return: \n1. Project Name\n2. 2-line description\n\nReturn as JSON: {{\"projects\": [{{\"name\": \"\", \"desc\": \"\"}}]}}\n\nResume:\n{resume_text}"
+    raw = call_ollama(prompt)
+    data = extract_json(raw)
+    return data.get('projects', []) if data else []
+
+def extract_text_from_docx(file_path):
+    try:
+        return docx2txt.process(file_path)
+    except Exception as e:
+        # Fallback: Try reading as plain text in case it's a mislabeled .txt file
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
+        except:
+            raise e
+
+def get_all_blocks(structured_resume):
+    """Universal helper to combine ALL evidence blocks into a single timeline."""
+    if not isinstance(structured_resume, dict): return []
+    combined = []
+    target_keys = ['evidence_blocks', 'projects', 'project_blocks', 'experience_blocks', 'employment_history', 'work_experience', 'evidenceblocks', 'EvidenceBlocks']
+    for k, v in structured_resume.items():
+        if k.lower() in target_keys and isinstance(v, list): combined.extend(v)
+    if not combined:
+        for val in structured_resume.values():
+            if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict): combined.extend(val)
+    return combined
+
+def calculate_skill_experience(structured_resume, jd_keywords, raw_text="", filename=""):
+    total_months = 0
+    current_date = datetime.now()
+
+    # Deduplicate overlapping date ranges to get REAL experience
+    jd_keywords_clean = [re.sub(r'[^\w\s\+\#\.]', '', k.lower().strip()) for k in jd_keywords]
+    intervals = []
+    
+    blocks = get_all_blocks(structured_resume)
+    for block in blocks:
+        if not isinstance(block, dict): continue
+        # 1. Block-Specific Text Assembly (Exhaustive & Crash-Proof)
+        description = block.get('description') or block.get('summary') or block.get('details') or ""
+        title = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+        tech_context = block.get('technical_context')
+        tech_list = tech_context if isinstance(tech_context, list) else []
+        tech_str = " ".join([str(t) for t in tech_list if t])
+        block_raw = " ".join([str(title), str(description), tech_str]).lower()
+        
+        # 2. Block-Level Matching (Lenient & Smart)
+        matched = False
+        for kw in jd_keywords_clean:
+            kw_clean = kw.lower().strip()
+            if kw_clean in block_raw: matched = True; break
+            kw_words = [w.strip() for w in kw_clean.split() if len(w) >= 2 and w not in ["proficiency", "knowledge", "experience"]]
+            if kw_words and any(w in block_raw for w in kw_words): matched = True; break
+        
+        if not matched: continue
+
+        # 3. DATE EXTRACTION & SCAVENGING
+        start_str = str(block.get('start_date', '')).strip()
+        end_str = str(block.get('end_date', '')).strip()
+        
+        if not start_str or start_str.lower() in ["unknown", "", "null"]:
+            date_p = r'(?:\d{1,2}[/-]\d{4}|[A-Z][a-z]{2,8}\s+\d{4}|\d{4})'
+            scan_text = str(block).lower()
+            d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', scan_text, re.IGNORECASE)
+            if d_match: start_str, end_str = d_match.groups()
+            else:
+                num_match = re.search(r'(\d{1,2})[/-](\d{4})', scan_text)
+                if num_match: start_str, end_str = num_match.group(0), "Present"
+        
+        if not start_str or start_str.lower() in ["unknown", "", "null"]: continue
+
+        # 4. Normalize & Parse Math
+        def clean_d(s):
+            s = s.lower().replace('.', '').replace(',', '').strip()
+            return re.sub(r'sept', 'sep', s)
+            
+        s_val = clean_d(start_str)
+        e_val = clean_d(end_str)
+
+        try:
+            def parse_direct(val_str):
+                c_v = re.sub(r'\s+', '', str(val_str)).lower()
+                m1 = re.search(r'(\d{1,2})[/-](\d{4})', c_v)
+                if m1: return datetime(int(m1.group(2)), int(m1.group(1)), 1)
+                m2 = re.search(r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)', val_str.lower())
+                y2 = re.search(r'(\d{4})', val_str)
+                if m2 and y2:
+                    months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
+                    return datetime(int(y2.group(1)), months.index(m2.group(1)) + 1, 1)
+                y3 = re.search(r'(\d{4})', val_str)
+                if y3: return datetime(int(y3.group(1)), 1, 1)
+                return None
+
+            s_date = parse_direct(s_val)
+            if not s_date: continue
+            e_date = current_date
+            if e_val not in ["present", "current", "now", "till date", "unknown"]:
+                parsed_e = parse_direct(e_val)
+                if parsed_e: e_date = parsed_e
+            intervals.append((s_date, e_date))
+        except: continue
+
+    if not intervals: return 0
+    intervals.sort()
+    merged = []
+    if intervals:
+        curr_s, curr_e = intervals[0]
+        for n_s, n_e in intervals[1:]:
+            if n_s <= curr_e: curr_e = max(curr_e, n_e)
+            else: merged.append((curr_s, curr_e)); curr_s, curr_e = n_s, n_e
+        merged.append((curr_s, curr_e))
+
+    total_months = 0
+    for s, e in merged: total_months += (e.year - s.year) * 12 + (e.month - s.month)
+    return round(max(total_months, 0) / 12, 1)
+
+
+def match_requirements(structured_resume, structured_jd, raw_text="", filename=""):
+    results = []
+    
+    # Use the combined, date-updated blocks from structured_resume
+    all_blocks = get_all_blocks(structured_resume)
+    
+    # Merge all project text into one pool for better matching
+    full_candidate_text = ""
+    for block in all_blocks:
+        if not isinstance(block, dict): continue
+        desc = block.get('description') or block.get('summary') or block.get('details') or ""
+        title = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+        tech_context = block.get('technical_context')
+        tech_list = tech_context if isinstance(tech_context, list) else []
+        tech_str = " ".join([str(t) for t in tech_list if t])
+        
+        block_full_text = " ".join([str(title), str(desc), tech_str]).lower()
+        if any(x in block_full_text for x in ["qnx", "freertos", "micrium", "vxworks", "threadx"]):
+            block_full_text += " rtos real-time operating system "
+            
+        project_text = re.sub(r'[^\w\s\+\#\.]', '', block_full_text)
+        full_candidate_text += project_text + " "
+
+    for req in structured_jd.get('requirements', []):
+        display_name = req.get('display_name') or req.get('keywords', ['Unknown'])[0]
+        keywords = [k.lower().strip() for k in req.get('keywords', [])]
+        category = req.get('category', '')
+        status = 'not_met'
+        evidence = ''
+        
+        # Search for JD keywords across the entire candidate pool (all projects)
+        fluff = ["strong", "proficiency", "knowledge", "of", "experience", "with", "working", "basic", "hands-on", "expertise", "in"]
+        clean_keywords = []
+        for k in keywords:
+            words = [w for w in k.split() if w not in fluff and len(w) > 1]
+            if words: clean_keywords.append(" ".join(words))
+            else: clean_keywords.append(k)
+
+        for kw in clean_keywords:
+            kw_low = kw.lower()
+            # Support special symbols in matching (C++, C#, .NET)
+            kw_regex = re.escape(kw_low).replace(r'\+', r'\+').replace(r'\#', r'\#')
+            
+            if re.search(r'\b' + kw_regex + r'\b', full_candidate_text.lower()) or kw_low in full_candidate_text.lower():
+                status = 'met'
+                break
+            
+            # Word-by-word overlap for long requirements
+            kw_words = [w for w in kw_low.split() if len(w) >= 2 and w not in fluff]
+            if kw_words and all(re.search(r'\b' + re.escape(w) + r'\b', full_candidate_text.lower()) for w in kw_words[:2]):
+                status = 'met'
+                break
+
+        # EXPERIENCE CALCULATION
+        exp = 0
+        if status == 'met':
+            exp = calculate_skill_experience(structured_resume, keywords, raw_text, filename)
+
+        # EVIDENCE EXTRACTION
+        if status == 'met':
+            for block in get_all_blocks(structured_resume):
+                if not isinstance(block, dict): continue
+                tech_list = block.get('technical_context', [])
+                if not isinstance(tech_list, list): tech_list = []
+                
+                # Block-Specific Evidence Check
+                desc_ev = block.get('description') or block.get('summary') or block.get('details') or ""
+                title_ev = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+                block_ev_text = " ".join([str(title_ev), str(desc_ev)]).lower()
+                
+                project_text = re.sub(r'[^\w\s\+\#\.]', '', block_ev_text)
+                
+                matched_kw = None
+                for kw in keywords:
+                    kw_low = kw.lower()
+                    kw_clean = re.sub(r'[^\w\s\+\#\.]', '', kw_low)
+                    kw_singular = kw_clean[:-1] if kw_clean.endswith('s') and len(kw_clean) > 3 else kw_clean
+                    if kw_clean in project_text or kw_singular in project_text:
+                        matched_kw = kw
+                        break
+                
+                if matched_kw:
+                    full_desc = block.get('description') or block.get('summary_of_work') or block.get('summary') or ""
+                    
+                    # Extreme Truncation: Max 1 sentence and 150 chars
+                    sentences = re.split(r'(?<=[.!?])\s+', full_desc)
+                    relevant_sentence = ""
+                    kw_clean_match = re.sub(r'[^\w\s\+\#\.]', '', matched_kw.lower())
+                    
+                    for s in sentences:
+                        if kw_clean_match in re.sub(r'[^\w\s\+\#\.]', '', s.lower()):
+                            relevant_sentence = s.strip()
+                            break
+                    
+                    final_text = relevant_sentence if relevant_sentence else full_desc
+                    if len(final_text) > 150:
+                        # Find the keyword and take context around it
+                        idx = final_text.lower().find(kw_clean_match)
+                        if idx != -1:
+                            start_idx = max(0, idx - 60)
+                            end_idx = min(len(final_text), idx + 90)
+                            final_text = ("..." if start_idx > 0 else "") + final_text[start_idx:end_idx] + ("..." if end_idx < len(final_text) else "")
+                        else:
+                            final_text = final_text[:147] + "..."
+                    
+                    evidence = final_text
+                    break
+
+        results.append({
+            "requirement": display_name,
+            "status": status,
+            "years_of_experience": exp,
+            "evidence_lines": evidence,
+            "category": category,
+            "is_mandatory": req.get('mandatory', True)
+        })
+
+    return results
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/api/analyze', methods=['POST'])
+def analyze():
+    try:
+        jd_text = request.form.get('jd', '')
+        files = request.files.getlist('resumes')
+
+        if not jd_text or not files:
+            return jsonify({"error": "Missing JD or resumes"}), 400
+
+        # STEP 1 — Extract JD Requirements (Atomic)
+        structured_jd = extract_jd_structure(jd_text)
+        print("DEBUG: STRUCTURED JD:", json.dumps(structured_jd, indent=2))
+
+        analysis_results = []
+
+        for file in files:
+            try:
+                filename = file.filename.lower()
+                resume_text = ""
+                
+                if filename.endswith('.pdf'):
+                    # PDF Extraction
+                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
+                    for page in pdf_reader.pages:
+                        resume_text += page.extract_text() + "\n"
+                elif filename.endswith('.docx'):
+                    # DOCX Extraction
+                    import docx2txt
+                    temp_path = f"temp_{file.filename}"
+                    file.save(temp_path)
+                    resume_text = docx2txt.process(temp_path)
+                    import os
+                    os.remove(temp_path)
+                else:
+                    # Plain Text Fallback
+                    resume_text = file.read().decode('utf-8', errors='ignore')
+
+                # Smart truncation
+                if len(resume_text) > 12000:
+                    resume_text = resume_text[:6000] + "\n...[TRUNCATED]...\n" + resume_text[-6000:]
+
+                # STEP 2 — Structured Resume Extraction
+                structured_resume = extract_resume_structure(resume_text)
+                structured_resume['raw_text'] = resume_text
+                
+                # REFINEMENT: Get Meaningful Summary & Dedicated Projects
+                meaningful_summary = get_meaningful_summary(resume_text)
+                structured_resume['ai_summary'] = meaningful_summary
+                
+                # Date Inheritance & Professional Timeline Scavenger
+                all_blocks = get_all_blocks(structured_resume)
+                
+                # Universal Date Pattern (Supports MM/YYYY, Month YYYY, YYYY)
+                date_p = r'(?:\d{1,2}[/-]\d{4}|[A-Z][a-z]{2,8}\s+\d{4}|\d{4})'
+                
+                # First Pass: Capture all JOB dates (Skip Education)
+                job_dates = []
+                for b in all_blocks:
+                    if not isinstance(b, dict): continue
+                    title = str(b.get('title') or b.get('role_title') or "").lower()
+                    context = str(b.get('context') or b.get('name') or "").lower()
+                    is_edu = any(x in title or x in context for x in ["university", "college", "school", "bachelor", "master", "diploma", "be", "b.e", "m.e", "cdac"])
+                    
+                    d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', str(b), re.IGNORECASE)
+                    if d_match and not is_edu:
+                        s_val, e_val = d_match.groups()
+                        job_dates.append((s_val, e_val))
+                
+                # Second Pass: Apply dates to all blocks (Inherit from closest job)
+                default_s, default_e = job_dates[0] if job_dates else ("Unknown", "Present")
+                current_s, current_e = default_s, default_e
+                
+                for b in all_blocks:
+                    if not isinstance(b, dict): continue
+                    d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', str(b), re.IGNORECASE)
+                    if d_match:
+                        current_s, current_e = d_match.groups()
+                        b['start_date'], b['end_date'] = current_s, current_e
+                    else:
+                        b['start_date'], b['end_date'] = current_s, current_e
+                
+                # Add a Global Skills block to ensure 100% matching
+                all_blocks.append({
+                    "project_name": "Global Skills Pool",
+                    "description": resume_text,
+                    "start_date": "Unknown",
+                    "end_date": "Present"
+                })
+
+                if len(all_blocks) < 3:
+                    print("DEBUG: Low block count. Running Dedicated Extraction.")
+                    dedicated_projs = get_dedicated_projects(resume_text)
+                    for p in dedicated_projs:
+                        all_blocks.append({
+                            "project_name": p.get('name', 'Project'),
+                            "description": p.get('desc', ''),
+                            "start_date": current_s,
+                            "end_date": current_e,
+                            "is_pure_project": True
+                        })
+                
+                structured_resume['evidence_blocks'] = all_blocks
+
+                # STEP 3 — Deterministic Matching
+                requirements_analysis = match_requirements(
+                    structured_resume, 
+                    structured_jd,
+                    resume_text,
+                    file.filename
+                )
+
+                # Scoring
+                mandatory = [r for r in requirements_analysis if r['is_mandatory']]
+                met_mandatory = [r for r in mandatory if r['status'] == 'met']
+                score = round((len(met_mandatory) / len(mandatory)) * 10, 1) if mandatory else 0
+
+                # Final Data Assembly
+                pure_projects = [b for b in get_all_blocks(structured_resume) if isinstance(b, dict) and b.get('project_name') != "Global Skills Pool"]
+
+                analysis_results.append({
+                    "filename": file.filename,
+                    "candidate_name": structured_resume.get('candidate_name', 'Unknown'),
+                    "score": score,
+                    "summary": meaningful_summary,
+                    "requirements_analysis": requimport os
+import re
+import json
+import ollama
+from flask import Flask, request, jsonify, render_template
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+import PyPDF2
+import io
+
+app = Flask(__name__)
+
+executor = ThreadPoolExecutor(max_workers=5)
+
+def call_ollama(prompt):
+    """Wrapper to call Ollama chat."""
+    try:
+        response = ollama.chat(
+            model='llama3:latest',
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        return response['message']['content']
+    except Exception as e:
+        print(f"Ollama Error: {e}")
+        return ""
+
+def extract_json(text):
+    """Surgically extract the first valid JSON object by counting braces and repairing if needed."""
+    if not text: return None
+    
+    # Pre-repair: If it ends abruptly, try to close it
+    text = text.strip()
+    if not text.endswith('}'):
+        # Primitive repair: add closing braces
+        text += ' } } }'
+
+    start = text.find('{')
+    if start == -1: return None
+    
+    count = 0
+    for i in range(start, len(text)):
+        if text[i] == '{': count += 1
+        elif text[i] == '}': count -= 1
+        
+        if count == 0:
+            try:
+                return json.loads(text[start:i+1])
+            except:
+                pass
+    
+    # If brace counting failed, try a greedy regex as a last resort
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        try: return json.loads(match.group(0))
+        except: return None
+        
+    return None
+
+JSON_SCHEMA_PROMPT = """
+    Return ONLY valid JSON in this structure:
+    {
+      "candidate_name": "Full Name",
+      "email": "Email Address",
+      "total_years_experience": number,
+      "evidence_blocks": [
+        {
+          "title": "Project Name or Job Title",
+          "context": "Company or Role",
+          "start_date": "MM/YYYY",
+          "end_date": "MM/YYYY",
+          "description": "Full technical details and achievements",
+          "technical_context": ["Skill1", "Skill2"]
+        }
+      ]
+    }
+
+    STRICT RULES:
+    1. Extract ALL technical projects.
+    2. Use MM/YYYY dates.
+    3. Return ONLY valid JSON. No text.
+"""
+
+def extract_resume_structure(resume_text):
+    prompt = f"""
+    Analyze this resume and extract technical evidence.
+    
+    {JSON_SCHEMA_PROMPT}
+
+    Resume:
+    {resume_text}
+    """
+    raw = call_ollama(prompt)
+    print("DEBUG: RAW RESUME OUTPUT:", raw[:500] + "...")
+    data = extract_json(raw)
+    
+    if not data:
+        return {"evidence_blocks": []}
+
+    # Indestructible Logic: If the keys are wrong but there's a list, use it
+    if not get_all_blocks(data):
+        for val in data.values():
+            if isinstance(val, list) and len(val) > 0:
+                data['evidence_blocks'] = val
+                return data
+                
+    return data
+
+def extract_jd_structure(jd_text):
+    prompt = f"""
+    Extract technical requirements from this JD.
+    
+    STRICT RULES:
+    1. 'keywords' MUST be a list of ATOMIC technical terms (e.g., ["C++", "RTOS"]).
+    2. NEVER include sentences.
+    3. Return ONLY raw JSON.
+
+    JSON FORMAT:
+    {{
+      "requirements": [
+        {{
+          "display_name": "short title",
+          "keywords": [],
+          "mandatory": true
+        }}
+      ]
+    }}
+
+    JD:
+    {jd_text}
+    """
+    raw = call_ollama(prompt)
+    print("DEBUG: RAW JD OUTPUT:", raw[:500] + "...")
+    data = extract_json(raw)
+    
+    if not data or not data.get('requirements'):
+        # Safety Fallback
+        return {
+            "requirements": [
+                {"display_name": "C++", "keywords": ["C++"], "mandatory": True},
+                {"display_name": "Embedded C", "keywords": ["Embedded C"], "mandatory": True},
+                {"display_name": "RTOS", "keywords": ["RTOS"], "mandatory": True}
+            ]
+        }
+    return data
+def get_meaningful_summary(resume_text):
+    """Generate a 2-3 line professional executive summary."""
+    prompt = f"STRICTLY return ONLY 2-3 lines of professional summary for this candidate. DO NOT include any introductory text, titles, or conversational filler. Start directly with the candidate's name or background.\n\nResume:\n{resume_text[:4000]}"
+    summary = call_ollama(prompt).strip()
+    # Deep Clean: Remove any line that mentions "summary" or "lines" at the start
+    lines = summary.split('\n')
+    cleaned_lines = []
+    for l in lines:
+        l = l.strip()
+        if not l: continue
+        # If the line looks like an introduction, skip it
+        if re.search(r'^(here is|summary|professional|2-3 line|executive)', l, re.IGNORECASE):
+            if ':' in l: 
+                l = l.split(':', 1)[1].strip()
+            else:
+                continue # Skip the line entirely if it's just a title
+        if l: cleaned_lines.append(l)
+    
+    final = " ".join(cleaned_lines)
+    # Final safety strip
+    final = re.sub(r'^(summary|executive summary|candidate summary)[:\s-]*', '', final, flags=re.IGNORECASE).strip()
+    return final.split("Let me know")[0].strip()
+
+def get_dedicated_projects(resume_text):
+    """Specifically extract only the technical projects."""
+    prompt = f"Extract every single technical project from this resume. For each project, return: \n1. Project Name\n2. 2-line description\n\nReturn as JSON: {{\"projects\": [{{\"name\": \"\", \"desc\": \"\"}}]}}\n\nResume:\n{resume_text}"
+    raw = call_ollama(prompt)
+    data = extract_json(raw)
+    return data.get('projects', []) if data else []
+
+def extract_text_from_docx(file_path):
+    try:
+        return docx2txt.process(file_path)
+    except Exception as e:
+        # Fallback: Try reading as plain text in case it's a mislabeled .txt file
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
+        except:
+            raise e
+
+def get_all_blocks(structured_resume):
+    """Universal helper to combine ALL evidence blocks into a single timeline."""
+    if not isinstance(structured_resume, dict): return []
+    combined = []
+    target_keys = ['evidence_blocks', 'projects', 'project_blocks', 'experience_blocks', 'employment_history', 'work_experience', 'evidenceblocks', 'EvidenceBlocks']
+    for k, v in structured_resume.items():
+        if k.lower() in target_keys and isinstance(v, list): combined.extend(v)
+    if not combined:
+        for val in structured_resume.values():
+            if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict): combined.extend(val)
+    return combined
+
+def calculate_skill_experience(structured_resume, jd_keywords, raw_text="", filename=""):
+    total_months = 0
+    current_date = datetime.now()
+
+    # Deduplicate overlapping date ranges to get REAL experience
+    jd_keywords_clean = [re.sub(r'[^\w\s\+\#\.]', '', k.lower().strip()) for k in jd_keywords]
+    intervals = []
+    
+    blocks = get_all_blocks(structured_resume)
+    for block in blocks:
+        if not isinstance(block, dict): continue
+        # 1. Block-Specific Text Assembly (Exhaustive & Crash-Proof)
+        description = block.get('description') or block.get('summary') or block.get('details') or ""
+        title = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+        tech_context = block.get('technical_context')
+        tech_list = tech_context if isinstance(tech_context, list) else []
+        tech_str = " ".join([str(t) for t in tech_list if t])
+        block_raw = " ".join([str(title), str(description), tech_str]).lower()
+        
+        # 2. Block-Level Matching (Lenient & Smart)
+        matched = False
+        for kw in jd_keywords_clean:
+            kw_clean = kw.lower().strip()
+            if kw_clean in block_raw: matched = True; break
+            kw_words = [w.strip() for w in kw_clean.split() if len(w) >= 2 and w not in ["proficiency", "knowledge", "experience"]]
+            if kw_words and any(w in block_raw for w in kw_words): matched = True; break
+        
+        if not matched: continue
+
+        # 3. DATE EXTRACTION & SCAVENGING
+        start_str = str(block.get('start_date', '')).strip()
+        end_str = str(block.get('end_date', '')).strip()
+        
+        if not start_str or start_str.lower() in ["unknown", "", "null"]:
+            date_p = r'(?:\d{1,2}[/-]\d{4}|[A-Z][a-z]{2,8}\s+\d{4}|\d{4})'
+            scan_text = str(block).lower()
+            d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', scan_text, re.IGNORECASE)
+            if d_match: start_str, end_str = d_match.groups()
+            else:
+                num_match = re.search(r'(\d{1,2})[/-](\d{4})', scan_text)
+                if num_match: start_str, end_str = num_match.group(0), "Present"
+        
+        if not start_str or start_str.lower() in ["unknown", "", "null"]: continue
+
+        # 4. Normalize & Parse Math
+        def clean_d(s):
+            s = s.lower().replace('.', '').replace(',', '').strip()
+            return re.sub(r'sept', 'sep', s)
+            
+        s_val = clean_d(start_str)
+        e_val = clean_d(end_str)
+
+        try:
+            def parse_direct(val_str):
+                c_v = re.sub(r'\s+', '', str(val_str)).lower()
+                m1 = re.search(r'(\d{1,2})[/-](\d{4})', c_v)
+                if m1: return datetime(int(m1.group(2)), int(m1.group(1)), 1)
+                m2 = re.search(r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)', val_str.lower())
+                y2 = re.search(r'(\d{4})', val_str)
+                if m2 and y2:
+                    months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
+                    return datetime(int(y2.group(1)), months.index(m2.group(1)) + 1, 1)
+                y3 = re.search(r'(\d{4})', val_str)
+                if y3: return datetime(int(y3.group(1)), 1, 1)
+                return None
+
+            s_date = parse_direct(s_val)
+            if not s_date: continue
+            e_date = current_date
+            if e_val not in ["present", "current", "now", "till date", "unknown"]:
+                parsed_e = parse_direct(e_val)
+                if parsed_e: e_date = parsed_e
+            intervals.append((s_date, e_date))
+        except: continue
+
+    if not intervals: return 0
+    intervals.sort()
+    merged = []
+    if intervals:
+        curr_s, curr_e = intervals[0]
+        for n_s, n_e in intervals[1:]:
+            if n_s <= curr_e: curr_e = max(curr_e, n_e)
+            else: merged.append((curr_s, curr_e)); curr_s, curr_e = n_s, n_e
+        merged.append((curr_s, curr_e))
+
+    total_months = 0
+    for s, e in merged: total_months += (e.year - s.year) * 12 + (e.month - s.month)
+    return round(max(total_months, 0) / 12, 1)
+
+
+def match_requirements(structured_resume, structured_jd, raw_text="", filename=""):
+    results = []
+    
+    # Use the combined, date-updated blocks from structured_resume
+    all_blocks = get_all_blocks(structured_resume)
+    
+    # Merge all project text into one pool for better matching
+    full_candidate_text = ""
+    for block in all_blocks:
+        if not isinstance(block, dict): continue
+        desc = block.get('description') or block.get('summary') or block.get('details') or ""
+        title = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+        tech_context = block.get('technical_context')
+        tech_list = tech_context if isinstance(tech_context, list) else []
+        tech_str = " ".join([str(t) for t in tech_list if t])
+        
+        block_full_text = " ".join([str(title), str(desc), tech_str]).lower()
+        if any(x in block_full_text for x in ["qnx", "freertos", "micrium", "vxworks", "threadx"]):
+            block_full_text += " rtos real-time operating system "
+            
+        project_text = re.sub(r'[^\w\s\+\#\.]', '', block_full_text)
+        full_candidate_text += project_text + " "
+
+    for req in structured_jd.get('requirements', []):
+        display_name = req.get('display_name') or req.get('keywords', ['Unknown'])[0]
+        keywords = [k.lower().strip() for k in req.get('keywords', [])]
+        category = req.get('category', '')
+        status = 'not_met'
+        evidence = ''
+        
+        # Search for JD keywords across the entire candidate pool (all projects)
+        fluff = ["strong", "proficiency", "knowledge", "of", "experience", "with", "working", "basic", "hands-on", "expertise", "in"]
+        clean_keywords = []
+        for k in keywords:
+            words = [w for w in k.split() if w not in fluff and len(w) > 1]
+            if words: clean_keywords.append(" ".join(words))
+            else: clean_keywords.append(k)
+
+        for kw in clean_keywords:
+            kw_low = kw.lower()
+            # Support special symbols in matching (C++, C#, .NET)
+            kw_regex = re.escape(kw_low).replace(r'\+', r'\+').replace(r'\#', r'\#')
+            
+            if re.search(r'\b' + kw_regex + r'\b', full_candidate_text.lower()) or kw_low in full_candidate_text.lower():
+                status = 'met'
+                break
+            
+            # Word-by-word overlap for long requirements
+            kw_words = [w for w in kw_low.split() if len(w) >= 2 and w not in fluff]
+            if kw_words and all(re.search(r'\b' + re.escape(w) + r'\b', full_candidate_text.lower()) for w in kw_words[:2]):
+                status = 'met'
+                break
+
+        # EXPERIENCE CALCULATION
+        exp = 0
+        if status == 'met':
+            exp = calculate_skill_experience(structured_resume, keywords, raw_text, filename)
+
+        # EVIDENCE EXTRACTION
+        if status == 'met':
+            for block in get_all_blocks(structured_resume):
+                if not isinstance(block, dict): continue
+                tech_list = block.get('technical_context', [])
+                if not isinstance(tech_list, list): tech_list = []
+                
+                # Block-Specific Evidence Check
+                desc_ev = block.get('description') or block.get('summary') or block.get('details') or ""
+                title_ev = block.get('title') or block.get('role_title') or block.get('project_name') or block.get('name') or ""
+                block_ev_text = " ".join([str(title_ev), str(desc_ev)]).lower()
+                
+                project_text = re.sub(r'[^\w\s\+\#\.]', '', block_ev_text)
+                
+                matched_kw = None
+                for kw in keywords:
+                    kw_low = kw.lower()
+                    kw_clean = re.sub(r'[^\w\s\+\#\.]', '', kw_low)
+                    kw_singular = kw_clean[:-1] if kw_clean.endswith('s') and len(kw_clean) > 3 else kw_clean
+                    if kw_clean in project_text or kw_singular in project_text:
+                        matched_kw = kw
+                        break
+                
+                if matched_kw:
+                    full_desc = block.get('description') or block.get('summary_of_work') or block.get('summary') or ""
+                    
+                    # Extreme Truncation: Max 1 sentence and 150 chars
+                    sentences = re.split(r'(?<=[.!?])\s+', full_desc)
+                    relevant_sentence = ""
+                    kw_clean_match = re.sub(r'[^\w\s\+\#\.]', '', matched_kw.lower())
+                    
+                    for s in sentences:
+                        if kw_clean_match in re.sub(r'[^\w\s\+\#\.]', '', s.lower()):
+                            relevant_sentence = s.strip()
+                            break
+                    
+                    final_text = relevant_sentence if relevant_sentence else full_desc
+                    if len(final_text) > 150:
+                        # Find the keyword and take context around it
+                        idx = final_text.lower().find(kw_clean_match)
+                        if idx != -1:
+                            start_idx = max(0, idx - 60)
+                            end_idx = min(len(final_text), idx + 90)
+                            final_text = ("..." if start_idx > 0 else "") + final_text[start_idx:end_idx] + ("..." if end_idx < len(final_text) else "")
+                        else:
+                            final_text = final_text[:147] + "..."
+                    
+                    evidence = final_text
+                    break
+
+        results.append({
+            "requirement": display_name,
+            "status": status,
+            "years_of_experience": exp,
+            "evidence_lines": evidence,
+            "category": category,
+            "is_mandatory": req.get('mandatory', True)
+        })
+
+    return results
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/api/analyze', methods=['POST'])
+def analyze():
+    try:
+        jd_text = request.form.get('jd', '')
+        files = request.files.getlist('resumes')
+
+        if not jd_text or not files:
+            return jsonify({"error": "Missing JD or resumes"}), 400
+
+        # STEP 1 — Extract JD Requirements (Atomic)
+        structured_jd = extract_jd_structure(jd_text)
+        print("DEBUG: STRUCTURED JD:", json.dumps(structured_jd, indent=2))
+
+        analysis_results = []
+
+        for file in files:
+            try:
+                filename = file.filename.lower()
+                resume_text = ""
+                
+                if filename.endswith('.pdf'):
+                    # PDF Extraction
+                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
+                    for page in pdf_reader.pages:
+                        resume_text += page.extract_text() + "\n"
+                elif filename.endswith('.docx'):
+                    # DOCX Extraction
+                    import docx2txt
+                    temp_path = f"temp_{file.filename}"
+                    file.save(temp_path)
+                    resume_text = docx2txt.process(temp_path)
+                    import os
+                    os.remove(temp_path)
+                else:
+                    # Plain Text Fallback
+                    resume_text = file.read().decode('utf-8', errors='ignore')
+
+                # Smart truncation
+                if len(resume_text) > 12000:
+                    resume_text = resume_text[:6000] + "\n...[TRUNCATED]...\n" + resume_text[-6000:]
+
+                # STEP 2 — Structured Resume Extraction
+                structured_resume = extract_resume_structure(resume_text)
+                structured_resume['raw_text'] = resume_text
+                
+                # REFINEMENT: Get Meaningful Summary & Dedicated Projects
+                meaningful_summary = get_meaningful_summary(resume_text)
+                structured_resume['ai_summary'] = meaningful_summary
+                
+                # Date Inheritance & Professional Timeline Scavenger
+                all_blocks = get_all_blocks(structured_resume)
+                
+                # Universal Date Pattern (Supports MM/YYYY, Month YYYY, YYYY)
+                date_p = r'(?:\d{1,2}[/-]\d{4}|[A-Z][a-z]{2,8}\s+\d{4}|\d{4})'
+                
+                # First Pass: Capture all JOB dates (Skip Education)
+                job_dates = []
+                for b in all_blocks:
+                    if not isinstance(b, dict): continue
+                    title = str(b.get('title') or b.get('role_title') or "").lower()
+                    context = str(b.get('context') or b.get('name') or "").lower()
+                    is_edu = any(x in title or x in context for x in ["university", "college", "school", "bachelor", "master", "diploma", "be", "b.e", "m.e", "cdac"])
+                    
+                    d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', str(b), re.IGNORECASE)
+                    if d_match and not is_edu:
+                        s_val, e_val = d_match.groups()
+                        job_dates.append((s_val, e_val))
+                
+                # Second Pass: Apply dates to all blocks (Inherit from closest job)
+                default_s, default_e = job_dates[0] if job_dates else ("Unknown", "Present")
+                current_s, current_e = default_s, default_e
+                
+                for b in all_blocks:
+                    if not isinstance(b, dict): continue
+                    d_match = re.search(r'(' + date_p + r')\s*(?:[-–—]|to|till|through)\s*(' + date_p + r'|Present|Current|Now)', str(b), re.IGNORECASE)
+                    if d_match:
+                        current_s, current_e = d_match.groups()
+                        b['start_date'], b['end_date'] = current_s, current_e
+                    else:
+                        b['start_date'], b['end_date'] = current_s, current_e
+                
+                # Add a Global Skills block to ensure 100% matching
+                all_blocks.append({
+                    "project_name": "Global Skills Pool",
+                    "description": resume_text,
+                    "start_date": "Unknown",
+                    "end_date": "Present"
+                })
+
+                if len(all_blocks) < 3:
+                    print("DEBUG: Low block count. Running Dedicated Extraction.")
+                    dedicated_projs = get_dedicated_projects(resume_text)
+                    for p in dedicated_projs:
+                        all_blocks.append({
+                            "project_name": p.get('name', 'Project'),
+                            "description": p.get('desc', ''),
+                            "start_date": current_s,
+                            "end_date": current_e,
+                            "is_pure_project": True
+                        })
+                
+                structured_resume['evidence_blocks'] = all_blocks
+
+                # STEP 3 — Deterministic Matching
+                requirements_analysis = match_requirements(
+                    structured_resume, 
+                    structured_jd,
+                    resume_text,
+                    file.filename
+                )
+
+                # Scoring
+                mandatory = [r for r in requirements_analysis if r['is_mandatory']]
+                met_mandatory = [r for r in mandatory if r['status'] == 'met']
+                score = round((len(met_mandatory) / len(mandatory)) * 10, 1) if mandatory else 0
+
+                # Final Data Assembly
+                pure_projects = [b for b in get_all_blocks(structured_resume) if isinstance(b, dict) and b.get('project_name') != "Global Skills Pool"]
+
+                analysis_results.append({
+                    "filename": file.filename,
+                    "candidate_name": structured_resume.get('candidate_name', 'Unknown'),
+                    "score": score,
+                    "summary": meaningful_summary,
+                    "requirements_analysis": requirements_analysis,
+                    "project_insights": [
+                        {
+                            "project_name": b.get('project_name') or b.get('title') or 'Project',
+                            "project_description": (b.get('description') or b.get('summary_of_work') or b.get('summary') or "")[:200] + "..."
+                        } for b in pure_projects[:5] # Max 5 projects for clarity
+                    ],
+                    "scoring_breakdown": {
+                        "mandatory_score": f"{score}/10",
+                        "projects_score": f"{len(pure_projects)} Projects",
+                        "depth_score": f"{max([r['years_of_experience'] for r in requirements_analysis] + [0])}y Peak",
+                        "logic_explanation": "Scoring based on mandatory technical requirements and project evidence."
+                    }
+                })
+            except Exception as e:
+                print(f"Error processing {file.filename}: {e}")
+                analysis_results.append({
+                    "filename": file.filename,
+                    "error": str(e)
+                })
+
+        return jsonify(analysis_results)
+
+    except Exception as e:
+        print(f"Global Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5001, debug=True)
+irements_analysis,
+                    "project_insights": [
+                        {
+                            "project_name": b.get('project_name') or b.get('title') or 'Project',
+                            "project_description": (b.get('description') or b.get('summary_of_work') or b.get('summary') or "")[:200] + "..."
+                        } for b in pure_projects[:5] # Max 5 projects for clarity
+                    ],
+                    "scoring_breakdown": {
+                        "mandatory_score": f"{score}/10",
+                        "projects_score": f"{len(pure_projects)} Projects",
+                        "depth_score": f"{max([r['years_of_experience'] for r in requirements_analysis] + [0])}y Peak",
+                        "logic_explanation": "Scoring based on mandatory technical requirements and project evidence."
+                    }
+                })
+            except Exception as e:
+                print(f"Error processing {file.filename}: {e}")
+                analysis_results.append({
+                    "filename": file.filename,
+                    "error": str(e)
+                })
+
+        return jsonify(analysis_results)
+
+    except Exception as e:
+        print(f"Global Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5001, debug=True)
+
+        print(f"Global Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5001, debug=True)
+ory if r['status'] == 'met']
+                score = round((len(met_mandatory) / len(mandatory)) * 10, 1) if mandatory else 0
+
+                # Final Data Assembly
+                pure_projects = [b for b in get_all_blocks(structured_resume) if isinstance(b, dict) and b.get('project_name') != "Global Skills Pool"]
+
+                analysis_results.append({
+                    "filename": file.filename,
+                    "candidate_name": structured_resume.get('candidate_name', 'Unknown'),
+                    "score": score,
+                    "summary": meaningful_summary,
+                    "requirements_analysis": requirements_analysis,
+                    "project_insights": [
+                        {
+                            "project_name": b.get('project_name') or b.get('title') or 'Project',
+                            "project_description": (b.get('description') or b.get('summary_of_work') or b.get('summary') or "")[:200] + "..."
+                        } for b in pure_projects[:5] # Max 5 projects for clarity
+                    ],
+                    "scoring_breakdown": {
+                        "mandatory_score": f"{score}/10",
+                        "projects_score": f"{len(pure_projects)} Projects",
+                        "depth_score": f"{max([r['years_of_experience'] for r in requirements_analysis] + [0])}y Peak",
+                        "logic_explanation": "Scoring based on mandatory technical requirements and project evidence."
+                    }
+                })
+            except Exception as e:
+                print(f"Error processing {file.filename}: {e}")
+                analysis_results.append({
+                    "filename": file.filename,
+                    "error": str(e)
+                })
+
+        return jsonify(analysis_results)
+
+    except Exception as e:
+        print(f"Global Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5001, debug=True)

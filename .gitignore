@@ -1,0 +1,34 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Sensitive Naukri profiles, sessions, and login states (VERY IMPORTANT)
+naukri_profile/
+naukri_profiles/
+naukri_auth.json
+
+# Debugging Screenshots and temp HTML dumps
+*.png
+*.jpg
+*.jpeg
+naukri_test.html
+sample_profile.html
+
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+
+# OS generated files
+.DS_Store
+Thumbs.db

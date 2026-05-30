@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic Resume Screener | Local LLM</title>
+    <link rel="stylesheet" href="static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=Inter:wght@400;500;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <span class="icon">🔍</span>
+                <h1>Talent<span class="accent">Pilot</span></h1>
+            </div>
+            <p class="subtitle">AI-Powered Talent Acquisition • Local & Private</p>
+
+            <nav class="tabs">
+                <button class="tab-btn active" data-tab="screening">Internal Screening</button>
+                <button class="tab-btn" data-tab="sourcing">External Sourcing</button>
+                <button class="tab-btn" data-tab="analysis">📊 Market Analysis</button>
+            </nav>
+        </header>
+
+        <main>
+            <section class="common-input card glass">
+                <h3>1. Core Job Description</h3>
+                <textarea id="jd-input"
+                    placeholder="Paste the job description here to power both screening and sourcing..."></textarea>
+            </section>
+
+            <div id="screening-view" class="tab-content active">
+                <section class="input-section">
+                    <div class="card glass">
+                        <h3>2. Upload Resumes</h3>
+                        <div id="drop-zone" class="drop-zone">
+                            <span class="drop-icon">📂</span>
+                            <p>Drag & drop up to 10 PDF resumes (PDFS/DOCX) or <span class="browse">browse</span></p>
+                            <input type="file" id="file-input" accept=".pdf,.doc,.docx" multiple hidden>
+                            <div id="file-list" class="file-list hidden"></div>
+                        </div>
+                        <button id="analyze-btn" class="primary-btn" disabled>Analyze Candidates</button>
+                    </div>
+                </section>
+            </div>
+
+            <div id="sourcing-view" class="tab-content">
+                <section class="input-section">
+                    <div class="card glass">
+                        <h3>🚀 One-Click AI Sourcing</h3>
+                        <p class="description">Automatically search and analyze profiles using your active Resdex
+                            session.</p>
+                        <button id="source-btn" class="secondary-btn" disabled>🔍 Start Naukri Sourcing</button>
+
+                    </div>
+                </section>
+            </div>
+
+            <div id="analysis-view" class="tab-content">
+                <section class="input-section">
+                    <div class="card glass">
+                        <h3>📊 Market Analysis</h3>
+                        <p class="description">Scan the full Naukri talent pool for this role across all experience levels. See supply, availability scores, and experience distribution — then export to Excel.</p>
+                        <button id="market-btn" class="secondary-btn" disabled>📊 Run Market Analysis</button>
+                    </div>
+                </section>
+            </div>
+
+            <section id="results-section" class="hidden">
+                <div class="loading-container hidden" id="loader">
+                    <div class="spinner"></div>
+                    <p id="loading-text">Local LLM is analyzing candidates...</p>
+                    <div class="progress-bar-container">
+                        <div id="progress-bar" class="progress-bar"></div>
+                    </div>
+                </div>
+
+                <div id="results-grid" class="results-grid">
+                    <!-- Dynamic result cards will be injected here -->
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Runs on <span class="model-tag">Llama 3</span> via Ollama</p>
+        </footer>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}?v=14"></script>
+</body>
+
+</html>
