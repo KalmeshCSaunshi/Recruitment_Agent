@@ -1,865 +1,3 @@
-# import requests
-# import json
-# import urllib.parse
-# import asyncio
-# from playwright.async_api import async_playwright
-
-# OLLAMA_API_URL = 'http://localhost:11434/api/generate'
-# MODEL_NAME = 'llama3:latest'
-
-# def extract_json(text):
-#     if not text: return None
-#     try:
-#         # 1. Direct parse
-#         return json.loads(text)
-#     except:
-#         try:
-#             # 2. Find anything between { }
-#             match = re.search(r'\{.*\}', text, re.DOTALL)
-#             if match:
-#                 clean = match.group(0)
-#                 # Quick fixes
-#                 clean = clean.replace("'", '"')
-#                 clean = re.sub(r'(\w+):', r'"\1":', clean)
-#                 return json.loads(clean)
-#         except:
-#             return None
-
-# def get_search_keywords(jd):
-#     import re
-#     prompt = f"Identify 3-5 technical keywords and a boolean query for this JD. Return ONLY JSON: {{\"primary_keywords\": [], \"boolean_query\": \"\"}}\n\nJD: {jd[:2000]}"
-#     try:
-#         payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False}
-#         response = requests.post(OLLAMA_API_URL, json=payload, timeout=60)
-#         data = extract_json(response.json().get('response', ''))
-#         if data: return data
-#     except: pass
-#     return {"primary_keywords": ["Software"], "boolean_query": "Software"}
-
-# async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
-#     import os, re, random
-#     PROFILE_DIR = "./naukri_profile"
-#     async with async_playwright() as p:
-#         context = await p.chromium.launch_persistent_context(
-#             user_data_dir=PROFILE_DIR,
-#             headless=True,
-#             ignore_https_errors=True,
-#             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-#             args=[
-#                 "--disable-http2", 
-#                 "--no-sandbox",
-#                 "--disable-setuid-sandbox",
-#                 "--disable-blink-features=AutomationControlled",
-#                 "--disable-infobars",
-#                 "--window-position=0,0",
-#                 "--window-size=1280,720",
-#                 "--disable-features=IsolateOrigins,site-per-process",
-#                 "--force-fieldtrials=HTTP2ScaleHolBlocking/Disabled"
-#             ]
-#         )
-#         page = context.pages[0] if context.pages else await context.new_page()
-
-#         try:
-#             # Anti-bot protections
-#             await page.add_init_script("""
-#             Object.defineProperty(navigator, 'webdriver', {
-#                 get: () => undefined
-#             });
-
-#             window.chrome = {
-#                 runtime: {}
-#             };
-
-#             Object.defineProperty(navigator, 'plugins', {
-#                 get: () => [1, 2, 3, 4, 5]
-#             });
-
-#             Object.defineProperty(navigator, 'languages', {
-#                     get: () => ['en-US', 'en']
-#                 });
-#             """)
-
-#             print(f"Starting live search for: {query}")
-
-#             try:
-#                 # Retry logic for navigation
-#                 for attempt in range(3):
-#                     try:
-#                         print(f"Navigation attempt {attempt+1}...")
-#                         await page.goto("https://www.naukri.com", wait_until="commit", timeout=30000)
-#                         await asyncio.sleep(2)
-#                         await page.goto("https://resdex.naukri.com/v3", wait_until="load", timeout=60000)
-#                         print("Navigatedboolean to Resdex successfully.")
-#                         break
-#                     except Exception as e:
-#                         print(f"Attempt {attempt+1} failed: {e}")
-#                         if attempt == 2: raise e
-#                         await asyncio.sleep(5)
-#             except Exception as e:
-#                 print(f"All navigation attempts failed: {e}")
-#                 try:
-#                     await page.screenshot(path="final_timeout.png", timeout=5000)
-#                 except:
-#                     pass
-#                 return []
-# import requests
-# import json
-# import urllib.parse
-# import asyncio
-# from playwright.async_api import async_playwright
-
-# OLLAMA_API_URL = 'http://localhost:11434/api/generate'
-# MODEL_NAME = 'llama3:latest'
-
-# def extract_json(text):
-#     if not text: return None
-#     try:
-#         # 1. Direct parse
-#         return json.loads(text)
-#     except:
-#         try:
-#             # 2. Find anything between { }
-#             match = re.search(r'\{.*\}', text, re.DOTALL)
-#             if match:
-#                 clean = match.group(0)
-#                 # Quick fixes
-#                 clean = clean.replace("'", '"')
-#                 clean = re.sub(r'(\w+):', r'"\1":', clean)
-#                 return json.loads(clean)
-#         except:
-#             return None
-
-# def get_search_keywords(jd):
-#     import re
-#     prompt = f"Identify 3-5 technical keywords and a boolean query for this JD. Return ONLY JSON: {{\"primary_keywords\": [], \"boolean_query\": \"\"}}\n\nJD: {jd[:2000]}"
-#     try:
-#         payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False}
-#         response = requests.post(OLLAMA_API_URL, json=payload, timeout=60)
-#         data = extract_json(response.json().get('response', ''))
-#         if data: return data
-#     except: pass
-#     return {"primary_keywords": ["Software"], "boolean_query": "Software"}
-
-# async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
-#     import os, re, random
-#     PROFILE_DIR = "./naukri_profile"
-#     async with async_playwright() as p:
-#         context = await p.chromium.launch_persistent_context(
-#             user_data_dir=PROFILE_DIR,
-#             headless=True,
-#             ignore_https_errors=True,
-#             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-#             args=[
-#                 "--disable-http2", 
-#                 "--no-sandbox",
-#                 "--disable-setuid-sandbox",
-#                 "--disable-blink-features=AutomationControlled",
-#                 "--disable-infobars",
-#                 "--window-position=0,0",
-#                 "--window-size=1280,720",
-#                 "--disable-features=IsolateOrigins,site-per-process",
-#                 "--force-fieldtrials=HTTP2ScaleHolBlocking/Disabled"
-#             ]
-#         )
-#         page = context.pages[0] if context.pages else await context.new_page()
-
-#         try:
-#             # Anti-bot protections
-#             await page.add_init_script("""
-#             Object.defineProperty(navigator, 'webdriver', {
-#                 get: () => undefined
-#             });
-
-#             window.chrome = {
-#                 runtime: {}
-#             };
-
-#             Object.defineProperty(navigator, 'plugins', {
-#                 get: () => [1, 2, 3, 4, 5]
-#             });
-
-#             Object.defineProperty(navigator, 'languages', {
-#                     get: () => ['en-US', 'en']
-#                 });
-#             """)
-
-#             print(f"Starting live search for: {query}")
-
-#             try:
-#                 # Retry logic for navigation
-#                 for attempt in range(3):
-#                     try:
-#                         print(f"Navigation attempt {attempt+1}...")
-#                         await page.goto("https://www.naukri.com", wait_until="commit", timeout=30000)
-#                         await asyncio.sleep(2)
-#                         await page.goto("https://resdex.naukri.com/v3", wait_until="load", timeout=60000)
-#                         print("Navigated to Resdex successfully.")
-#                         break
-#                     except Exception as e:
-#                         print(f"Attempt {attempt+1} failed: {e}")
-#                         if attempt == 2: raise e
-#                         await asyncio.sleep(5)
-#             except Exception as e:
-#                 print(f"All navigation attempts failed: {e}")
-#                 try:
-#                     await page.screenshot(path="final_timeout.png", timeout=5000)
-#                 except:
-#                     pass
-#                 return []
-
-#             # Wait for page to be ready
-#             await asyncio.sleep(5)
-#             await page.screenshot(path="after_load.png")
-#             print(f"DEBUG: Current URL: {page.url}")
-
-#             if "login" in page.url.lower():
-#                 print("Session expired or redirected to login. Please log in manually in the popup.")
-#                 await asyncio.sleep(30) # Give time to login
-
-#             # Try multiple ways to find the keyword input
-#             keyword_selectors = [
-#                 "input[placeholder*='skills']",
-#                 "input[placeholder*='Keywords']",
-#                 "#skill-input",
-#                 ".keyword-input",
-#                 "input[name='keywords']",
-#                 "input[name='ezKeywordsAny']",
-#                 "input[type='text']"
-#             ]
-            
-#             search_input = None
-#             for selector in keyword_selectors:
-#                 try:
-#                     search_input = await page.wait_for_selector(selector, timeout=5000)
-#                     if search_input:
-#                         print(f"Found search input: {selector}")
-#                         break
-#                 except:
-#                     continue
-
-#             if not search_input:
-#                 print("Search input not found. Trying manual Tab + Type...")
-#                 await page.keyboard.press("Tab")
-#                 await page.keyboard.type(query)
-#             else:
-#                 await search_input.click()
-#                 await asyncio.sleep(1)
-#                 await search_input.fill(query)
-#                 print(f"Keywords entered: {query}")
-
-#             await asyncio.sleep(1)
-#             await page.keyboard.press("Enter")
-
-#             # Search Button (Backup)
-#             try:
-#                 search_btn_selectors = ["button:has-text('Search')", ".search-btn", "#search-button"]
-#                 for btn in search_btn_selectors:
-#                     if await page.is_visible(btn):
-#                         await page.click(btn)
-#                         print(f"Clicked search button: {btn}")
-#                         break
-#             except:
-#                 pass
-
-#             print("Waiting for results...")
-#             await asyncio.sleep(10)
-
-#             # Pagination
-#             if page_num > 1:
-#                 for _ in range(page_num - 1):
-#                     try:
-#                         await page.click("text=Next")
-#                         await asyncio.sleep(5)
-#                     except:
-#                         break
-
-#             # Candidate Cards
-#             card_selectors = [".tuple", ".tuple-container", ".candidate-card", "[class*='tuple']"]
-#             cards = []
-#             for selector in card_selectors:
-#                 try:
-#                     cards = await page.query_selector_all(selector)
-#                     if cards:
-#                         print(f"Found {len(cards)} cards.")
-#                         break
-#                 except:
-#                     pass
-
-#             results = []
-#             if not cards:
-#                 print("No candidate cards found.")
-#                 await page.screenshot(path="no_results.png")
-#                 return []
-
-#             for index, card in enumerate(cards[:10], start=1):
-#                 try:
-#                     print(f"Processing candidate {index}")
-#                     name = "Candidate " + str(index)
-#                     exp_text = "N/A"
-#                     np_text = "N/A"
-#                     profile_url = None
-
-#                     # Try to get real name
-#                     name_el = await card.query_selector(".name, .title, .tuple-name, .name-text, [class*='name']")
-#                     if name_el:
-#                         name = (await name_el.inner_text()).strip()
-
-#                     # Experience
-#                     try:
-#                         exp_el = await card.query_selector(".exp, .tuple-exp, .exp-text, [class*='exp']")
-#                         if exp_el:
-#                             exp_text = (await exp_el.inner_text()).strip()
-#                     except:
-#                         pass
-
-#                     # Notice Period
-#                     try:
-#                         np_el = await card.query_selector(".tuple-np, .np-text, [class*='notice'], [class*='np']")
-#                         if np_el:
-#                             np_text = (await np_el.inner_text()).strip()
-#                     except:
-#                         pass
-#                     # Skills
-#                     try:
-#                         skills_el = await card.query_selector(".key-skills, .skill-container")
-#                         if skills_el:
-#                             context_text = (await skills_el.inner_text()).strip()
-#                         else:
-#                             context_text = ""
-#                     except:
-#                         context_text = ""
-
-#                     # Profile URL
-#                     try:
-#                         link_el = await card.query_selector("a")
-#                         if link_el:
-#                             profile_url = await link_el.get_attribute("href")
-#                             if profile_url and not profile_url.startswith("http"):
-#                                 profile_url = "https://resdex.naukri.com" + profile_url
-#                     except:
-#                         pass
-
-#                     email_text = "Hidden"
-#                     phone_text = "Hidden"
-
-#                     # Results Collection
-#                     results.append({
-#                         "name": name,
-#                         "exp": exp_text,
-#                         "context": context_text,
-#                         "notice_period": np_text,
-#                         "phone": phone_text,
-#                         "email": email_text,
-#                         "link": profile_url or page.url
-#                     })
-
-#                     print(f"Extracted: {name}")
-#                     await asyncio.sleep(2)
-
-#                 except Exception as e:
-#                     print(f"Error extracting candidate {index}: {e}")
-
-#             print(f"Successfully extracted {len(results)} leads.")
-#             return {
-#                 "leads": results,
-#                 "final_url": page.url
-#             }
-
-#         except Exception as e:
-#             print(f"Live search error: {e}")
-#             try:
-#                 await page.screenshot(path="live_search_error.png")
-#             except:
-#                 pass
-#             return [{"error": f"Search failed: {str(e)}"}]
-
-#         finally:
-#             await context.close()
-
-# def simulate_naukri_search(data):
-#     primary = data.get('primary_keywords', [])
-#     secondary = data.get('secondary_keywords', [])
-#     boolean = data.get('boolean_query', "")
-    
-#     # We'll return the keywords so the frontend knows what we searched for
-#     return {
-#         "keywords_used": primary + secondary,
-#         "boolean_query": boolean,
-#         "simulated_leads": [] # Will be populated by the live search in app.py
-#     }# import requests
-# import json
-# import urllib.parse
-# import asyncio
-# from playwright.async_api import async_playwright
-
-# OLLAMA_API_URL = 'http://localhost:11434/api/generate'
-# MODEL_NAME = 'llama3:latest'
-
-# def extract_json(text):
-#     if not text: return None
-#     try:
-#         # 1. Direct parse
-#         return json.loads(text)
-#     except:
-#         try:
-#             # 2. Find anything between { }
-#             match = re.search(r'\{.*\}', text, re.DOTALL)
-#             if match:
-#                 clean = match.group(0)
-#                 # Quick fixes
-#                 clean = clean.replace("'", '"')
-#                 clean = re.sub(r'(\w+):', r'"\1":', clean)
-#                 return json.loads(clean)
-#         except:
-#             return None
-
-# def get_search_keywords(jd):
-#     import re
-#     prompt = f"Identify 3-5 technical keywords and a boolean query for this JD. Return ONLY JSON: {{\"primary_keywords\": [], \"boolean_query\": \"\"}}\n\nJD: {jd[:2000]}"
-#     try:
-#         payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False}
-#         response = requests.post(OLLAMA_API_URL, json=payload, timeout=60)
-#         data = extract_json(response.json().get('response', ''))
-#         if data: return data
-#     except: pass
-#     return {"primary_keywords": ["Software"], "boolean_query": "Software"}
-
-# async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
-#     import os, re, random
-#     PROFILE_DIR = "./naukri_profile"
-#     async with async_playwright() as p:
-#         context = await p.chromium.launch_persistent_context(
-#             user_data_dir=PROFILE_DIR,
-#             headless=True,
-#             ignore_https_errors=True,
-#             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-#             args=[
-#                 "--disable-http2", 
-#                 "--no-sandbox",
-#                 "--disable-setuid-sandbox",
-#                 "--disable-blink-features=AutomationControlled",
-#                 "--disable-infobars",
-#                 "--window-position=0,0",
-#                 "--window-size=1280,720",
-#                 "--disable-features=IsolateOrigins,site-per-process",
-#                 "--force-fieldtrials=HTTP2ScaleHolBlocking/Disabled"
-#             ]
-#         )
-#         page = context.pages[0] if context.pages else await context.new_page()
-
-#         try:
-#             # Anti-bot protections
-#             await page.add_init_script("""
-#             Object.defineProperty(navigator, 'webdriver', {
-#                 get: () => undefined
-#             });
-
-#             window.chrome = {
-#                 runtime: {}
-#             };
-
-#             Object.defineProperty(navigator, 'plugins', {
-#                 get: () => [1, 2, 3, 4, 5]
-#             });
-
-#             Object.defineProperty(navigator, 'languages', {
-#                     get: () => ['en-US', 'en']
-#                 });
-#             """)
-
-#             print(f"Starting live search for: {query}")
-
-#             try:
-#                 # Retry logic for navigation
-#                 for attempt in range(3):
-#                     try:
-#                         print(f"Navigation attempt {attempt+1}...")
-#                         await page.goto("https://www.naukri.com", wait_until="commit", timeout=30000)
-#                         await asyncio.sleep(2)
-#                         await page.goto("https://resdex.naukri.com/v3", wait_until="load", timeout=60000)
-#                         print("Navigated to Resdex successfully.")
-#                         break
-#                     except Exception as e:
-#                         print(f"Attempt {attempt+1} failed: {e}")
-#                         if attempt == 2: raise e
-#                         await asyncio.sleep(5)
-#             except Exception as e:
-#                 print(f"All navigation attempts failed: {e}")
-#                 try:
-#                     await page.screenshot(path="final_timeout.png", timeout=5000)
-#                 except:
-#                     pass
-#                 return []
-
-#             # Wait for page to be ready
-#             await asyncio.sleep(5)
-#             await page.screenshot(path="after_load.png")
-#             print(f"DEBUG: Current URL: {page.url}")
-
-#             if "login" in page.url.lower():
-#                 print("Session expired or redirected to login. Please log in manually in the popup.")
-#                 await asyncio.sleep(30) # Give time to login
-
-#             # Try multiple ways to find the keyword input
-#             keyword_selectors = [
-#                 "input[placeholder*='skills']",
-#                 "input[placeholder*='Keywords']",
-#                 "#skill-input",
-#                 ".keyword-input",
-#                 "input[name='keywords']",
-#                 "input[name='ezKeywordsAny']",
-#                 "input[type='text']"
-#             ]
-            
-#             search_input = None
-#             for selector in keyword_selectors:
-#                 try:
-#                     search_input = await page.wait_for_selector(selector, timeout=5000)
-#                     if search_input:
-#                         print(f"Found search input: {selector}")
-#                         break
-#                 except:
-#                     continue
-
-#             if not search_input:
-#                 print("Search input not found. Trying manual Tab + Type...")
-#                 await page.keyboard.press("Tab")
-#                 await page.keyboard.type(query)
-#             else:
-#                 await search_input.click()
-#                 await asyncio.sleep(1)
-#                 await search_input.fill(query)
-#                 print(f"Keywords entered: {query}")
-
-#             await asyncio.sleep(1)
-#             await page.keyboard.press("Enter")
-
-#             # Search Button (Backup)
-#             try:
-#                 search_btn_selectors = ["button:has-text('Search')", ".search-btn", "#search-button"]
-#                 for btn in search_btn_selectors:
-#                     if await page.is_visible(btn):
-#                         await page.click(btn)
-#                         print(f"Clicked search button: {btn}")
-#                         break
-#             except:
-#                 pass
-
-#             print("Waiting for results...")
-#             await asyncio.sleep(10)
-
-#             # Pagination
-#             if page_num > 1:
-#                 for _ in range(page_num - 1):
-#                     try:
-#                         await page.click("text=Next")
-#                         await asyncio.sleep(5)
-#                     except:
-#                         break
-
-#             # Candidate Cards
-#             card_selectors = [".tuple", ".tuple-container", ".candidate-card", "[class*='tuple']"]
-#             cards = []
-#             for selector in card_selectors:
-#                 try:
-#                     cards = await page.query_selector_all(selector)
-#                     if cards:
-#                         print(f"Found {len(cards)} cards.")
-#                         break
-#                 except:
-#                     pass
-
-#             results = []
-#             if not cards:
-#                 print("No candidate cards found.")
-#                 await page.screenshot(path="no_results.png")
-#                 return []
-
-#             for index, card in enumerate(cards[:10], start=1):
-#                 try:
-#                     print(f"Processing candidate {index}")
-#                     name = "Candidate " + str(index)
-#                     exp_text = "N/A"
-#                     np_text = "N/A"
-#                     profile_url = None
-
-#                     # Try to get real name
-#                     name_el = await card.query_selector(".name, .title, .tuple-name, .name-text, [class*='name']")
-#                     if name_el:
-#                         name = (await name_el.inner_text()).strip()
-
-#                     # Experience
-#                     try:
-#                         exp_el = await card.query_selector(".exp, .tuple-exp, .exp-text, [class*='exp']")
-#                         if exp_el:
-#                             exp_text = (await exp_el.inner_text()).strip()
-#                     except:
-#                         pass
-
-#                     # Notice Period
-#                     try:
-#                         np_el = await card.query_selector(".tuple-np, .np-text, [class*='notice'], [class*='np']")
-#                         if np_el:
-#                             np_text = (await np_el.inner_text()).strip()
-#                     except:
-#                         pass
-#                     # Skills
-#                     try:
-#                         skills_el = await card.query_selector(".key-skills, .skill-container")
-#                         if skills_el:
-#                             context_text = (await skills_el.inner_text()).strip()
-#                         else:
-#                             context_text = ""
-#                     except:
-#                         context_text = ""
-
-#                     # Profile URL
-#                     try:
-#                         link_el = await card.query_selector("a")
-#                         if link_el:
-#                             profile_url = await link_el.get_attribute("href")
-#                             if profile_url and not profile_url.startswith("http"):
-#                                 profile_url = "https://resdex.naukri.com" + profile_url
-#                     except:
-#                         pass
-
-#                     email_text = "Hidden"
-#                     phone_text = "Hidden"
-
-#                     # Results Collection
-#                     results.append({
-#                         "name": name,
-#                         "exp": exp_text,
-#                         "context": context_text,
-#                         "notice_period": np_text,
-#                         "phone": phone_text,
-#                         "email": email_text,
-#                         "link": profile_url or page.url
-#                     })
-
-#                     print(f"Extracted: {name}")
-#                     await asyncio.sleep(2)
-
-#                 except Exception as e:
-#                     print(f"Error extracting candidate {index}: {e}")
-
-#             print(f"Successfully extracted {len(results)} leads.")
-#             return {
-#                 "leads": results,
-#                 "final_url": page.url
-#             }
-
-#         except Exception as e:
-#             print(f"Live search error: {e}")
-#             try:
-#                 await page.screenshot(path="live_search_error.png")
-#             except:
-#                 pass
-#             return [{"error": f"Search failed: {str(e)}"}]
-
-#         finally:
-#             await context.close()
-
-# def simulate_naukri_search(data):
-#     primary = data.get('primary_keywords', [])
-#     secondary = data.get('secondary_keywords', [])
-#     boolean = data.get('boolean_query', "")
-    
-#     # We'll return the keywords so the frontend knows what we searched for
-#     return {
-#         "keywords_used": primary + secondary,
-#         "boolean_query": boolean,
-#         "simulated_leads": [] # Will be populated by the live search in app.py
-#     }
-
-
-
-
-#             # Wait for page to be ready
-#             await asyncio.sleep(5)
-#             await page.screenshot(path="after_load.png")
-#             print(f"DEBUG: Current URL: {page.url}")
-
-#             if "login" in page.url.lower():
-#                 print("Session expired or redirected to login. Please log in manually in the popup.")
-#                 await asyncio.sleep(30) # Give time to login
-
-#             # Try multiple ways to find the keyword input
-#             keyword_selectors = [
-#                 "input[placeholder*='skills']",
-#                 "input[placeholder*='Keywords']",
-#                 "#skill-input",
-#                 ".keyword-input",
-#                 "input[name='keywords']",
-#                 "input[name='ezKeywordsAny']",
-#                 "input[type='text']"
-#             ]
-            
-#             search_input = None
-#             for selector in keyword_selectors:
-#                 try:
-#                     search_input = await page.wait_for_selector(selector, timeout=5000)
-#                     if search_input:
-#                         print(f"Found search input: {selector}")
-#                         break
-#                 except:
-#                     continue
-
-#             if not search_input:
-#                 print("Search input not found. Trying manual Tab + Type...")
-#                 await page.keyboard.press("Tab")
-#                 await page.keyboard.type(query)
-#             else:
-#                 await search_input.click()
-#                 await asyncio.sleep(1)
-#                 await search_input.fill(query)
-#                 print(f"Keywords entered: {query}")
-
-#             await asyncio.sleep(1)
-#             await page.keyboard.press("Enter")
-
-#             # Search Button (Backup)
-#             try:
-#                 search_btn_selectors = ["button:has-text('Search')", ".search-btn", "#search-button"]
-#                 for btn in search_btn_selectors:
-#                     if await page.is_visible(btn):
-#                         await page.click(btn)
-#                         print(f"Clicked search button: {btn}")
-#                         break
-#             except:
-#                 pass
-
-#             print("Waiting for results...")
-#             await asyncio.sleep(10)
-
-#             # Pagination
-#             if page_num > 1:
-#                 for _ in range(page_num - 1):
-#                     try:
-#                         await page.click("text=Next")
-#                         await asyncio.sleep(5)
-#                     except:
-#                         break
-
-#             # Candidate Cards
-#             card_selectors = [".tuple", ".tuple-container", ".candidate-card", "[class*='tuple']"]
-#             cards = []
-#             for selector in card_selectors:
-#                 try:
-#                     cards = await page.query_selector_all(selector)
-#                     if cards:
-#                         print(f"Found {len(cards)} cards.")
-#                         break
-#                 except:
-#                     pass
-
-#             results = []
-#             if not cards:
-#                 print("No candidate cards found.")
-#                 await page.screenshot(path="no_results.png")
-#                 return []
-
-#             for index, card in enumerate(cards[:10], start=1):
-#                 try:
-#                     print(f"Processing candidate {index}")
-#                     name = "Candidate " + str(index)
-#                     exp_text = "N/A"
-#                     np_text = "N/A"
-#                     profile_url = None
-
-#                     # Try to get real name
-#                     name_el = await card.query_selector(".name, .title, .tuple-name, .name-text, [class*='name']")
-#                     if name_el:
-#                         name = (await name_el.inner_text()).strip()
-
-#                     # Experience
-#                     try:
-#                         exp_el = await card.query_selector(".exp, .tuple-exp, .exp-text, [class*='exp']")
-#                         if exp_el:
-#                             exp_text = (await exp_el.inner_text()).strip()
-#                     except:
-#                         pass
-
-#                     # Notice Period
-#                     try:
-#                         np_el = await card.query_selector(".tuple-np, .np-text, [class*='notice'], [class*='np']")
-#                         if np_el:
-#                             np_text = (await np_el.inner_text()).strip()
-#                     except:
-#                         pass
-#                     # Skills
-#                     try:
-#                         skills_el = await card.query_selector(".key-skills, .skill-container")
-#                         if skills_el:
-#                             context_text = (await skills_el.inner_text()).strip()
-#                         else:
-#                             context_text = ""
-#                     except:
-#                         context_text = ""
-
-#                     # Profile URL
-#                     try:
-#                         link_el = await card.query_selector("a")
-#                         if link_el:
-#                             profile_url = await link_el.get_attribute("href")
-#                             if profile_url and not profile_url.startswith("http"):
-#                                 profile_url = "https://resdex.naukri.com" + profile_url
-#                     except:
-#                         pass
-
-#                     email_text = "Hidden"
-#                     phone_text = "Hidden"
-
-#                     # Results Collection
-#                     results.append({
-#                         "name": name,
-#                         "exp": exp_text,
-#                         "context": context_text,
-#                         "notice_period": np_text,
-#                         "phone": phone_text,
-#                         "email": email_text,
-#                         "link": profile_url or page.url
-#                     })
-
-#                     print(f"Extracted: {name}")
-#                     await asyncio.sleep(2)
-
-#                 except Exception as e:
-#                     print(f"Error extracting candidate {index}: {e}")
-
-#             print(f"Successfully extracted {len(results)} leads.")
-#             return {
-#                 "leads": results,
-#                 "final_url": page.url
-#             }
-
-#         except Exception as e:
-#             print(f"Live search error: {e}")
-#             try:
-#                 await page.screenshot(path="live_search_error.png")
-#             except:
-#                 pass
-#             return [{"error": f"Search failed: {str(e)}"}]
-
-#         finally:
-#             await context.close()
-
-# def simulate_naukri_search(data):
-#     primary = data.get('primary_keywords', [])
-#     secondary = data.get('secondary_keywords', [])
-#     boolean = data.get('boolean_query', "")
-    
-#     # We'll return the keywords so the frontend knows what we searched for
-#     return {
-#         "keywords_used": primary + secondary,
-#         "boolean_query": boolean,
-#         "simulated_leads": [] # Will be populated by the live search in app.py
-#     }
-
-
-
-
-
 
 import requests
 import json
@@ -873,6 +11,36 @@ PROFILE_DIR = "./naukri_profile"
 
 OLLAMA_API_URL = 'http://10.153.204.33:11434/api/generate'
 MODEL_NAME = 'llama3:latest'
+
+def resolve_ollama_config():
+    import requests
+    # Try localhost first
+    try:
+        r = requests.get("http://10.153.204.33:11434/api/tags", timeout=1.5)
+        if r.status_code == 200:
+            models = [m['name'] for m in r.json().get('models', [])]
+            for preferred in ["gemma4:e4b", "qwen2.5-coder:14b", "llama3:latest"]:
+                if preferred in models:
+                    return "http://10.153.204.33:11434/api/generate", preferred
+            if models:
+                return "http://10.153.204.33:11434/api/generate", models[0]
+    except Exception:
+        pass
+
+ 
+    # Try remote IP next
+    try:
+        r = requests.get("http://10.153.204.33:11434/api/tags", timeout=1.5)
+        if r.status_code == 200:
+            return "http://10.153.204.33:11434/api/generate", "llama3:latest"
+    except Exception:
+        pass
+
+    # Default fallback
+    return "http://10.153.204.33:11434/api/generate", "gemma4:e4b"
+
+OLLAMA_API_URL, MODEL_NAME = resolve_ollama_config()
+print(f"DEBUG: Resolved Ollama config to {OLLAMA_API_URL} with model {MODEL_NAME}", flush=True)
 
 def is_candidate_active_in_30_days(active_text):
     if not active_text:
@@ -944,7 +112,16 @@ def extract_notice_period_from_card_text(card_txt):
     if not card_txt:
         return "N/A"
     
-    lines = [line.strip() for line in card_txt.split("\n") if line.strip()]
+    import re
+    raw_lines = [line.strip() for line in card_txt.split("\n") if line.strip()]
+    
+    # Process pipes: if any line contains pipes, split them into sub-lines
+    lines = []
+    for line in raw_lines:
+        if "|" in line:
+            lines.extend([p.strip() for p in line.split("|") if p.strip()])
+        else:
+            lines.append(line)
     
     # 1. Look for explicit notice period indicators
     for line in lines:
@@ -969,7 +146,23 @@ def extract_notice_period_from_card_text(card_txt):
 async def ensure_boolean_toggle_on(page):
     print("📊 Ensuring Boolean toggle is turned ON...", flush=True)
     try:
-        # 1. First, check if the toggle is explicitly OFF
+        # 1. First, check the actual checkbox state (ground truth)
+        cb = await page.query_selector("input[name='toggleSwitch']")
+        if cb:
+            is_checked = await cb.is_checked()
+            if is_checked:
+                print("📊 Boolean toggle is ALREADY ON (verified via checkbox state).", flush=True)
+                return True
+            else:
+                print("📊 Boolean toggle is OFF (verified via checkbox state). Clicking toggle...", flush=True)
+                # Click the parent label or the wrapper to toggle state
+                parent = await page.query_selector(".toggle-switch-wrap, label.ts-switch, label.boolean-toggle")
+                if parent:
+                    await parent.click()
+                    await page.wait_for_timeout(2000)
+                    return True
+
+        # 2. Fallback: check if the toggle label class explicitly indicates it's OFF
         off_toggle = await page.query_selector("label.boolean-toggle.off, label.ts-switch.off")
         if off_toggle:
             print("📊 Boolean toggle is currently OFF. Clicking to turn it ON...", flush=True)
@@ -977,73 +170,112 @@ async def ensure_boolean_toggle_on(page):
             await page.wait_for_timeout(2000)
             return True
             
-        # 2. Check if it's already ON
+        # 3. Fallback: check if it's already ON by class
         on_toggle = await page.query_selector("label.boolean-toggle.on, label.ts-switch.on")
         if on_toggle:
             print("📊 Boolean toggle is ALREADY ON. No click needed.", flush=True)
             return True
             
-        # 3. Fallback: check by text label
+        # 4. Fallback: check by text label
         lbl = await page.query_selector(".toggle-switch-label")
         if lbl:
             txt = (await lbl.inner_text()).lower()
             if "boolean off" in txt:
-                print("📊 Boolean toggle is OFF (by text label). Clicking...", flush=True)
-                await lbl.click()
+                print("📊 Boolean toggle is OFF (by text label). Clicking wrapper...", flush=True)
+                # Try clicking wrapper or label
+                parent = await page.query_selector(".toggle-switch-wrap, label.ts-switch, label.boolean-toggle") or lbl
+                await parent.click()
                 await page.wait_for_timeout(2000)
                 return True
             elif "boolean on" in txt:
                 print("📊 Boolean toggle is ALREADY ON (by text label).", flush=True)
                 return True
-                
-        # 4. Deep fallback: click if the checkbox is not checked
-        cb = await page.query_selector("input[name='toggleSwitch']")
-        if cb:
-            is_checked = await cb.is_checked()
-            if not is_checked:
-                print("📊 Checkbox is unchecked. Clicking toggle switch wrapper...", flush=True)
-                wrapper = await page.query_selector(".toggle-switch-wrap")
-                if wrapper:
-                    await wrapper.click()
-                    await page.wait_for_timeout(2000)
-                    return True
     except Exception as e:
         print(f"📊 Error ensuring Boolean toggle is ON: {e}", flush=True)
     return False
 
-async def market_scan_search(query, min_exp=2, max_exp=10, max_pages=5):
+async def ensure_boolean_toggle_off(page):
+    print("📊 Ensuring Boolean toggle is turned OFF...", flush=True)
+    try:
+        # 1. First, check the actual checkbox state (ground truth)
+        cb = await page.query_selector("input[name='toggleSwitch']")
+        if cb:
+            is_checked = await cb.is_checked()
+            if not is_checked:
+                print("📊 Boolean toggle is ALREADY OFF (verified via checkbox state).", flush=True)
+                return True
+            else:
+                print("📊 Boolean toggle is ON (verified via checkbox state). Clicking toggle to turn OFF...", flush=True)
+                # Click the parent label or the wrapper to toggle state
+                parent = await page.query_selector(".toggle-switch-wrap, label.ts-switch, label.boolean-toggle")
+                if parent:
+                    await parent.click()
+                    await page.wait_for_timeout(2000)
+                    return True
+
+        # 2. Fallback: check if the toggle label class explicitly indicates it's ON
+        on_toggle = await page.query_selector("label.boolean-toggle.on, label.ts-switch.on")
+        if on_toggle:
+            print("📊 Boolean toggle is currently ON. Clicking to turn it OFF...", flush=True)
+            await on_toggle.click()
+            await page.wait_for_timeout(2000)
+            return True
+            
+        # 3. Fallback: check if it's already OFF by class
+        off_toggle = await page.query_selector("label.boolean-toggle.off, label.ts-switch.off")
+        if off_toggle:
+            print("📊 Boolean toggle is ALREADY OFF. No click needed.", flush=True)
+            return True
+            
+        # 4. Fallback: check by text label
+        lbl = await page.query_selector(".toggle-switch-label")
+        if lbl:
+            txt = (await lbl.inner_text()).lower()
+            if "boolean on" in txt:
+                print("📊 Boolean toggle is ON (by text label). Clicking wrapper to turn OFF...", flush=True)
+                parent = await page.query_selector(".toggle-switch-wrap, label.ts-switch, label.boolean-toggle") or lbl
+                await parent.click()
+                await page.wait_for_timeout(2000)
+                return True
+            elif "boolean off" in txt:
+                print("📊 Boolean toggle is ALREADY OFF (by text label).", flush=True)
+                return True
+    except Exception as e:
+        print(f"📊 Error ensuring Boolean toggle is OFF: {e}", flush=True)
+    return False
+
+async def market_scan_search(query, min_exp=2, max_exp=10, max_pages=5, profile_path=None):
     """
     Fast market scan — reads card data across multiple pages WITHOUT opening profiles.
     Uses the SAME UI flow as perform_authenticated_search (persistent context + boolean toggle).
     Returns ALL candidates found for Excel export.
     """
+    user_data_dir = profile_path or PROFILE_DIR
     all_candidates = []
 
     # Parse query parameter (could be dictionary of separate keywords or string)
-    mandatory = ""
-    optional = ""
-    boolean_query = ""
+    mandatory_skills = []
+    optional_skills = []
     if isinstance(query, dict):
-        mandatory = query.get('mandatory_keywords', '')
-        optional = query.get('optional_keywords', '')
-        boolean_query = query.get('boolean_query', '')
+        mandatory_val = query.get('mandatory_skills') or query.get('mandatory_keywords') or []
+        optional_val = query.get('optional_skills') or query.get('optional_keywords') or []
         
-        # Safe Fallback: if boolean_query is empty, construct it dynamically!
-        if not boolean_query:
-            if mandatory and optional:
-                opt_terms = [t.strip() for t in optional.split(",") if t.strip()]
-                opt_joined = " OR ".join(opt_terms)
-                boolean_query = f"({mandatory}) AND ({opt_joined})"
-            elif mandatory:
-                boolean_query = mandatory
-            else:
-                boolean_query = " ".join(query.get('primary_keywords', []))
+        if isinstance(mandatory_val, list):
+            mandatory_skills = mandatory_val
+        else:
+            mandatory_skills = [s.strip() for s in str(mandatory_val).split(",") if s.strip()]
+            
+        if isinstance(optional_val, list):
+            optional_skills = optional_val
+        else:
+            optional_skills = [s.strip() for s in str(optional_val).split(",") if s.strip()]
     else:
-        boolean_query = query
+        # If it's a string, treat it as a single mandatory skill
+        mandatory_skills = [s.strip() for s in str(query).split(",") if s.strip()]
 
     async with async_playwright() as p:
         # Auto-heal stale lock file
-        lock_file = os.path.join(PROFILE_DIR, "SingletonLock")
+        lock_file = os.path.join(user_data_dir, "SingletonLock")
         if os.path.exists(lock_file):
             try:
                 os.remove(lock_file)
@@ -1060,9 +292,9 @@ async def market_scan_search(query, min_exp=2, max_exp=10, max_pages=5):
         else:
             launch_args.append("--start-maximized")
 
-        print(f"📊 Market scan: Launching Chromium (headless={headless_mode})...", flush=True)
+        print(f"📊 Market scan: Launching Chromium (headless={headless_mode}) at {user_data_dir}...", flush=True)
         context = await p.chromium.launch_persistent_context(
-            user_data_dir=PROFILE_DIR,
+            user_data_dir=user_data_dir,
             executable_path=exec_path,
             headless=headless_mode,
             viewport={"width": 1280, "height": 800} if headless_mode else None,
@@ -1097,51 +329,93 @@ async def market_scan_search(query, min_exp=2, max_exp=10, max_pages=5):
             except Exception:
                 pass
 
-            # Step 2 & 3: Ensure Boolean toggle is ON and fill the VISIBLE search box with Boolean query
-            await ensure_boolean_toggle_on(page)
+            # Step 2: Ensure Boolean toggle is OFF
+            await ensure_boolean_toggle_off(page)
 
-            skill_input = None
-            for selector in [
-                "input[name='boolKeywords']:visible", 
-                "input[name='booleanKeywordsAny']:visible",
-                "input[name='ezKeywordsAny']:visible",
-                "textarea:visible", 
-                "input[name='boolKeywords']", 
-                "input[name='booleanKeywordsAny']",
-                "input[name='ezKeywordsAny']"
-            ]:
-                try:
-                    el = await page.wait_for_selector(selector, timeout=2000)
-                    if el and await el.is_visible():
-                        skill_input = el
-                        print(f"📊 Market scan: Found active visible search input using: {selector}", flush=True)
-                        break
-                except Exception:
-                    pass
-
-            if not skill_input:
-                # Comprehensive fallback loop
-                for fallback_sel in [
-                    "input[name='boolKeywords']", 
-                    "input[name='booleanKeywordsAny']", 
+            # Step 3: Enter keywords as chips/tags
+            # Helper to find current active keywords input
+            async def get_active_keywords_input():
+                for selector in [
                     "input[name='ezKeywordsAny']", 
+                    "input[placeholder*='skills']", 
+                    "input[placeholder*='Skills']", 
+                    "[class*='keyword-input'] input", 
                     "textarea"
                 ]:
                     try:
-                        el = await page.wait_for_selector(fallback_sel, timeout=2000)
-                        if el:
-                            skill_input = el
-                            print(f"📊 Market scan: Found input via fallback selector: {fallback_sel}", flush=True)
-                            break
+                        el = await page.wait_for_selector(selector, timeout=2000)
+                        if el and await el.is_visible():
+                            return el
                     except Exception:
                         pass
+                return None
 
-            if not skill_input:
-                print("📊 Market scan: Could not find search input.", flush=True)
-                return []
+            # Type and add all mandatory skills
+            for skill in mandatory_skills:
+                try:
+                    el = await get_active_keywords_input()
+                    if not el:
+                        print(f"Warning: Could not locate keywords input to enter mandatory skill: {skill}")
+                        continue
+                    
+                    print(f"Adding mandatory skill: {skill}", flush=True)
+                    await el.focus()
+                    await el.fill("")
+                    await page.keyboard.type(skill, delay=50)
+                    await page.wait_for_timeout(1000)
+                    
+                    dropdown_item = await page.query_selector(
+                        ".autocomplete-suggestion, [class*='suggestion'] div, #suggestor-listbox [role='option'], .suggestor-wrapper [role='option'], [id*='listbox'] [role='option'], [class*='listbox'] [role='option'], .suggestor-box + div [role='option']"
+                    )
+                    if dropdown_item:
+                        await dropdown_item.click()
+                    else:
+                        await page.keyboard.press("Enter")
+                    await page.wait_for_timeout(3000)
+                except Exception as skill_err:
+                    print(f"Could not enter mandatory skill '{skill}': {skill_err}", flush=True)
 
-            await skill_input.fill(boolean_query)
-            print(f"📊 Market scan: Query entered: {boolean_query}", flush=True)
+            # Type and add all optional skills
+            for skill in optional_skills:
+                try:
+                    el = await get_active_keywords_input()
+                    if not el:
+                        print(f"Warning: Could not locate keywords input to enter optional skill: {skill}")
+                        continue
+                    
+                    print(f"Adding optional skill: {skill}", flush=True)
+                    await el.focus()
+                    await el.fill("")
+                    await page.keyboard.type(skill, delay=50)
+                    await page.wait_for_timeout(1000)
+                    
+                    dropdown_item = await page.query_selector(
+                        ".autocomplete-suggestion, [class*='suggestion'] div, #suggestor-listbox [role='option'], .suggestor-wrapper [role='option'], [id*='listbox'] [role='option'], [class*='listbox'] [role='option'], .suggestor-box + div [role='option']"
+                    )
+                    if dropdown_item:
+                        await dropdown_item.click()
+                    else:
+                        await page.keyboard.press("Enter")
+                    await page.wait_for_timeout(500)
+                except Exception as skill_err:
+                    print(f"Could not enter optional skill '{skill}': {skill_err}", flush=True)
+
+            # Mark Mandatory Skills as Starred (Only the 2nd mandatory skill needs to be manually starred, since the 1st is starred by default)
+            if len(mandatory_skills) > 1:
+                skill_to_star = mandatory_skills[1]
+                try:
+                    tag = await page.wait_for_selector(
+                        f"button.star-tag-wrapper:has-text('{skill_to_star}'), button[aria-label='{skill_to_star}'], .tag-label:has-text('{skill_to_star}'), span:has-text('{skill_to_star}'), .tag:has-text('{skill_to_star}')", 
+                        timeout=3000
+                    )
+                    if tag:
+                        star_btn = await tag.query_selector("i.star, .star, .star-icon, [class*='star']")
+                        click_target = star_btn if star_btn else tag
+                        await click_target.click()
+                        print(f"Starred mandatory skill (2nd skill): {skill_to_star}", flush=True)
+                        await page.wait_for_timeout(500)
+                except Exception as star_err:
+                    print(f"Could not star mandatory skill {skill_to_star}: {star_err}", flush=True)
 
             # Step 4: Set experience filter
             try:
@@ -1264,7 +538,10 @@ async def market_scan_search(query, min_exp=2, max_exp=10, max_pages=5):
                                 await next_btn.scroll_into_view_if_needed()
                             except Exception:
                                 pass
-                            await next_btn.click()
+                            try:
+                                await next_btn.click(timeout=3000)
+                            except Exception:
+                                await next_btn.evaluate("el => el.click()")
                             await page.wait_for_timeout(5000)
                         else:
                             print("📊 Market scan: No Next button found. Reached last page.", flush=True)
@@ -1282,32 +559,127 @@ async def market_scan_search(query, min_exp=2, max_exp=10, max_pages=5):
     return all_candidates
 
 
+def deterministic_keywords_fallback(jd, for_market_analysis=False):
+    import re
+    # Simple regex extraction to grab key terms from the JD
+    words = re.findall(r'\b[A-Za-z0-9+#\-\.]+\b', jd)
+    
+    # Generic stop words to filter out
+    stop_words = {"job", "description", "title", "role", "requirements", "and", "or", "to", "the", "in", "of", "with", "a", "for"}
+    keywords = [w for w in words if w.lower() not in stop_words and len(w) > 2]
+    
+    # Heuristic: First key term is treated as primary role title
+    title = keywords[0] if keywords else "Software Engineer"
+    optional = keywords[1:5] if len(keywords) > 1 else []
+    
+    # Extract experience range
+    min_exp = 2
+    max_exp = 8
+    jd_lower = jd.lower()
+    exp_matches = re.findall(r'(\d+)\s*-\s*(\d+)\s*(?:years?|yrs?)', jd_lower)
+    if exp_matches:
+        try:
+            min_exp = int(exp_matches[0][0])
+            max_exp = int(exp_matches[0][1])
+        except Exception:
+            pass
+    else:
+        exp_single = re.findall(r'(\d+)\s*\+\s*(?:years?|yrs?)', jd_lower)
+        if exp_single:
+            try:
+                min_exp = int(exp_single[0])
+                max_exp = min_exp + 5
+            except Exception:
+                pass
+
+    # Extract Location (Simple Substring Check)
+    location = "N/A"
+    indian_cities = ["bangalore", "bengaluru", "pune", "hyderabad", "chennai", "noida", "mumbai", "gurgaon", "delhi", "kolkata", "ahmedabad"]
+    for city in indian_cities:
+        if city in jd_lower:
+            location = "Bangalore" if city in ["bangalore", "bengaluru"] else city.capitalize()
+            break
+
+    # Extract Notice Period (Simple Substring Check)
+    notice_period = "N/A"
+    if "immediate" in jd_lower or "serving notice" in jd_lower:
+        notice_period = "Immediate"
+    elif "15 days" in jd_lower:
+        notice_period = "15 Days"
+    elif "30 days" in jd_lower or "1 month" in jd_lower:
+        notice_period = "30 Days"
+
+    return {
+        "primary_keywords": keywords[:5],
+        "mandatory_skills": [title],
+        "optional_skills": optional,
+        "min_exp": min_exp,
+        "max_exp": max_exp,
+        "location": location,
+        "notice_period": notice_period
+    }
+
+
+def verify_notice_period_in_jd(np, jd):
+    np_lower = np.lower()
+    jd_lower = jd.lower()
+    if not np or np_lower == "n/a":
+        return False
+        
+    # Check simple direct match first
+    np_clean = re.sub(r'[^0-9a-z]', '', np_lower)
+    jd_clean = re.sub(r'[^0-9a-z]', '', jd_lower)
+    if np_clean in jd_clean:
+        return True
+        
+    # Map normalized notice periods to common variations
+    if "serving" in np_lower or "currently" in np_lower:
+        terms = ["serving", "immediate", "lwd", "last working", "active", "resigned"]
+        return any(t in jd_lower for t in terms)
+    if "15" in np_lower or "0" in np_lower:
+        terms = ["15", "immediate", "serving", "join immediately", "joiners", "0-15"]
+        return any(t in jd_lower for t in terms)
+    if "1 month" in np_lower or "30" in np_lower or "one month" in np_lower:
+        terms = ["30", "1 month", "one month", "30 days", "month"]
+        return any(t in jd_lower for t in terms)
+    if "2 month" in np_lower or "60" in np_lower:
+        terms = ["60", "2 month", "two month", "60 days"]
+        return any(t in jd_lower for t in terms)
+    if "3 month" in np_lower or "90" in np_lower:
+        terms = ["90", "3 month", "three month", "90 days"]
+        return any(t in jd_lower for t in terms)
+        
+    return False
+
+
 def get_search_keywords(jd, for_market_analysis=False):
     if for_market_analysis:
         prompt = f"""
-        You are a Senior Technical Sourcer building a Naukri Resdex search query for a WIDE-FUNNEL Talent Market Analysis.
-        
-        STRATEGY: We want to capture the overall market size and distribution for this specific domain. Therefore, we only want the CORE ROLE DOMAIN as the single mandatory skill. Specific tools, sub-skills, and validation terms must be completely OPTIONAL to ensure a wide but highly accurate candidate pool.
-        
+        You are a Senior Technical Sourcer extracting keywords for WIDE-FUNNEL Talent Market Analysis.
+        Identify target location and notice period if specified in the JD.
+
         TASKS:
-        1. Identify the CORE ROLE DOMAIN or primary role title of this job. This will be the ONLY mandatory skill.
-           CRITICAL RULE: The mandatory skill MUST represent the core domain of the job. Do NOT use broad or generic multi-industry terms unless they are the primary focus of the role.
-        2. Identify 4-5 optional related skills (tools, validation techniques, protocols).
-        3. Build a fallback boolean_query in this exact pattern:
-           (core_role_domain) AND (optional_1 OR optional_2 OR optional_3 OR optional_4)
-        
-        4. Keep total boolean_query under 250 characters.
-        5. Extract experience range from the JD.
-        6. List 5 primary keywords separately.
+        1. Extract the required Experience Range (Min/Max years).
+        2. Identify ALL core technical keywords from the JD (do not limit or truncate, extract all of them).
+        3. Determine which of these are core mandatory skills and which are optional.
+
+        CRITICAL RULES:
+        1. Extract ONLY clean, atomic technology/skill names (e.g. "React", "TypeScript", "TRDP", "IEC-61131").
+        2. Do NOT include conversational text, headers, or descriptions.
+        3. Do NOT include parenthetical explanations. Each skill in the JSON arrays must be a single, short keyword/tag (1-3 words max).
+        4. "mandatory_skills" MUST contain ALL core technical skills and domains mentioned in the JD (e.g., "ADAS", "Computer Vision", "Automated Driving", "Automated Parking", "Image Processing"). Do NOT leave "mandatory_skills" empty.
+        5. "optional_skills" MUST contain all other nice-to-have or secondary skills.
 
         Return ONLY valid JSON:
         {{
-            "primary_keywords": ["skill1", "skill2", "skill3", "skill4", "skill5"],
-            "mandatory_keywords": "core_role_domain",
-            "optional_keywords": "opt1, opt2, opt3, opt4",
-            "boolean_query": "(core_role_domain) AND (opt1 OR opt2 OR opt3 OR opt4)",
+            "primary_keywords": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
+            "boolean_query": "\"Skill1\" AND \"Skill2\" AND \"Skill3\"",
+            "mandatory_skills": ["core_skill_1", "core_skill_2", "core_skill_3", "core_skill_4", "core_skill_5", "core_skill_6"],
+            "optional_skills": ["opt1", "opt2", "opt3"],
             "min_exp": 2,
-            "max_exp": 8
+            "max_exp": 8,
+            "location": "",
+            "notice_period": ""
         }}
 
         JD:
@@ -1315,28 +687,24 @@ def get_search_keywords(jd, for_market_analysis=False):
         """
     else:
         prompt = f"""
-        You are a Senior Technical Sourcer building a Naukri Resdex search query.
-        
-        STRATEGY: Use a WIDE FUNNEL approach to get maximum candidates. Our backend AI will rank and filter them.
+        You are a Senior Technical Sourcer. Extract skills, location, and notice period from the JD.
 
-        TASKS:
-        1. Identify the TOP 2 absolutely critical skills (without which the candidate cannot do this job at all). These will be MANDATORY.
-        2. Identify 4-5 other important skills. These will be OPTIONAL.
-        3. Build a fallback boolean_query in this exact pattern:
-           (mandatory_skill_1) AND (mandatory_skill_2) AND (optional_1 OR optional_2 OR optional_3 OR optional_4)
-        
-        4. Keep total boolean_query under 250 characters.
-        5. Extract experience range from the JD.
-        6. List 5 primary keywords separately.
+        CRITICAL RULES:
+        1. Extract ONLY clean, atomic technology/skill names (e.g. "React", "TypeScript", "TRDP", "IEC-61131").
+        2. Do NOT include conversational text, headers, or descriptions.
+        3. Do NOT include parenthetical explanations. Each skill in the JSON arrays must be a single, short keyword/tag (1-3 words max).
+        4. "mandatory_skills" MUST contain ALL core, non-negotiable technical skills required for the role (e.g., "ADAS", "Computer Vision", "Automated Driving", "Automated Parking", "Image Processing", "C++"). Do NOT leave "mandatory_skills" empty.
+        5. Extract all skills mentioned in the JD. Do not restrict the list to just a few; include all of them.
 
         Return ONLY valid JSON:
         {{
-            "primary_keywords": ["skill1", "skill2", "skill3", "skill4", "skill5"],
-            "mandatory_keywords": "mandatory_skill_1, mandatory_skill_2",
-            "optional_keywords": "opt1, opt2, opt3, opt4",
-            "boolean_query": "(mandatory1) AND (mandatory2) AND (opt1 OR opt2 OR opt3 OR opt4)",
+            "primary_keywords": ["skill1", "skill2", "skill3", "skill4", "skill5", "skill6", "skill7", "skill8"],
+            "mandatory_skills": ["mandatory_skill_1", "mandatory_skill_2", "mandatory_skill_3", "mandatory_skill_4", "mandatory_skill_5"],
+            "optional_skills": ["opt1", "opt2", "opt3"],
             "min_exp": 2,
-            "max_exp": 8
+            "max_exp": 8,
+            "location": "",
+            "notice_period": ""
         }}
 
         JD:
@@ -1351,17 +719,32 @@ def get_search_keywords(jd, for_market_analysis=False):
         }
         response = requests.post(OLLAMA_API_URL, json=payload, timeout=120)
         response.raise_for_status()
-        return json.loads(response.json().get('response'))
+        raw_json = json.loads(response.json().get('response'))
+
+        # Simple Substring Truth-Check for Location & Notice Period to prevent Hallucination
+        loc = str(raw_json.get("location") or "").strip()
+        if not loc or loc.lower() == "n/a" or loc.lower() not in jd.lower():
+            raw_json["location"] = "N/A"
+        else:
+            raw_json["location"] = loc
+
+        np = str(raw_json.get("notice_period") or "").strip()
+        if verify_notice_period_in_jd(np, jd):
+            raw_json["notice_period"] = np
+        else:
+            raw_json["notice_period"] = "N/A"
+
+        # Defensive fallback: If mandatory_skills is empty but primary_keywords has content, copy them over
+        if not raw_json.get("mandatory_skills") and raw_json.get("primary_keywords"):
+            raw_json["mandatory_skills"] = raw_json["primary_keywords"]
+
+        print("DEBUG: Keywords successfully generated by LLM (Ollama). Result:", raw_json, flush=True)
+        return raw_json
     except Exception as e:
-        print(f"Error getting keywords: {e}")
-        return {
-            "primary_keywords": ["Software Engineer"],
-            "mandatory_keywords": "Software Engineer",
-            "optional_keywords": "",
-            "boolean_query": "Software Engineer",
-            "min_exp": 2,
-            "max_exp": 8
-        }
+        print(f"Error getting keywords: {e}. Running deterministic fallback parser...")
+        fallback_res = deterministic_keywords_fallback(jd, for_market_analysis=for_market_analysis)
+        print("DEBUG: Keywords generated by deterministic fallback parser. Result:", fallback_res, flush=True)
+        return fallback_res
 
 
 def get_chromium_executable_path():
@@ -1406,26 +789,40 @@ def is_headless_required():
     # Default to False for visual debugging on local GUI systems
     return False
 
-async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
+async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1, profile_path=None):
     experience_range = (min_exp, max_exp)
+    user_data_dir = profile_path or PROFILE_DIR
     
     # Parse query parameter (could be dictionary of separate keywords or string)
     mandatory = ""
     optional = ""
     boolean_query = ""
     if isinstance(query, dict):
-        mandatory = query.get('mandatory_keywords', '')
-        optional = query.get('optional_keywords', '')
-        boolean_query = query.get('boolean_query', '')
+        mandatory_val = query.get('mandatory_skills') or query.get('mandatory_keywords') or ''
+        optional_val = query.get('optional_skills') or query.get('optional_keywords') or ''
+        boolean_query = query.get('boolean_query') or ''
         
+        if isinstance(mandatory_val, list):
+            mandatory = ", ".join(mandatory_val)
+        else:
+            mandatory = str(mandatory_val)
+            
+        if isinstance(optional_val, list):
+            optional = ", ".join(optional_val)
+        else:
+            optional = str(optional_val)
+            
         # Safe Fallback: if boolean_query is empty, construct it dynamically!
         if not boolean_query:
             if mandatory and optional:
                 opt_terms = [t.strip() for t in optional.split(",") if t.strip()]
                 opt_joined = " OR ".join(opt_terms)
-                boolean_query = f"({mandatory}) AND ({opt_joined})"
+                mand_terms = [t.strip() for t in mandatory.split(",") if t.strip()]
+                mand_joined = " AND ".join(mand_terms)
+                boolean_query = f"({mand_joined}) AND ({opt_joined})"
             elif mandatory:
-                boolean_query = mandatory
+                mand_terms = [t.strip() for t in mandatory.split(",") if t.strip()]
+                boolean_query = " AND ".join(mand_terms)
             else:
                 boolean_query = " ".join(query.get('primary_keywords', []))
     else:
@@ -1436,7 +833,7 @@ async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
         try:
             # Auto-heal: delete stale Chromium process singleton lock files if present
             import os
-            lock_file = os.path.join(PROFILE_DIR, "SingletonLock")
+            lock_file = os.path.join(user_data_dir, "SingletonLock")
             if os.path.exists(lock_file):
                 print(f"Stale browser lock found at {lock_file}. Healing directory...", flush=True)
                 try:
@@ -1466,10 +863,10 @@ async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
                 launch_args.append("--start-maximized")
                 viewport_setting = None # Let it maximize
                 
-            print(f"Launching Chromium: path={exec_path}, headless={headless_mode}", flush=True)
+            print(f"Launching Chromium: path={exec_path}, headless={headless_mode} at {user_data_dir}", flush=True)
             
             context = await p.chromium.launch_persistent_context(
-                user_data_dir=PROFILE_DIR,
+                user_data_dir=user_data_dir,
                 executable_path=exec_path,
                 headless=headless_mode,
                 viewport=viewport_setting,
@@ -1546,306 +943,439 @@ async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
                     pass
             
             
-            # 1 & 2. Ensure Boolean toggle is ON and fill the VISIBLE search box with Boolean query
-            await ensure_boolean_toggle_on(page)
+            # 1. Target standard Resdex keywords input field and enter skills
+            mandatory_skills = query.get("mandatory_skills", [])
+            optional_skills = query.get("optional_skills", [])
+            
+            # Helper to find current active keywords input
+            async def get_active_keywords_input():
+                for selector in [
+                    "input[name='ezKeywordsAny']", 
+                    "input[placeholder*='skills']", 
+                    "input[placeholder*='Skills']", 
+                    "[class*='keyword-input'] input", 
+                    "textarea"
+                ]:
+                    try:
+                        el = await page.wait_for_selector(selector, timeout=2000)
+                        if el and await el.is_visible():
+                            return el
+                    except Exception:
+                        pass
+                return None
 
-            skill_input = None
-            for selector in ["input[name='boolKeywords']:visible", "input[name='boolKeywords']:visible", "textarea:visible", "input[name='boolKeywords']", "input[name='boolKeywords']"]:
+            # Type and add all mandatory skills
+            for skill in mandatory_skills:
                 try:
-                    el = await page.wait_for_selector(selector, timeout=3000)
-                    if el and await el.is_visible():
-                        skill_input = el
-                        print(f"Found active visible search input using: {selector}", flush=True)
-                        break
-                except Exception:
-                    pass
-
-            if not skill_input:
-                # Direct fallback
-                skill_input = await page.wait_for_selector("input[name='boolKeywords']", timeout=5000)
-
-            if skill_input:
-                await skill_input.fill(boolean_query)
-                print(f"Keywords entered: {boolean_query}")
-                
-                # 3. Add Experience Filter from JD
-                try:
-                    print(f"Setting Experience Filter: {min_exp} to {max_exp} years...")
-                    min_field = await page.wait_for_selector("input[placeholder*='Min'], #minExp, [name='minExp']", timeout=5000)
-                    if min_field:
-                        await min_field.fill(str(min_exp))
+                    el = await get_active_keywords_input()
+                    if not el:
+                        print(f"Warning: Could not locate keywords input to enter mandatory skill: {skill}")
+                        continue
                     
-                    max_field = await page.wait_for_selector("input[placeholder*='Max'], #maxExp, [name='maxExp']", timeout=5000)
-                    if max_field:
-                        await max_field.fill(str(max_exp))
-                except:
-                    print("Could not set experience filter.")
+                    print(f"Adding mandatory skill: {skill}", flush=True)
+                    await el.focus()
+                    await el.fill("")
+                    await page.keyboard.type(skill, delay=50)
+                    await page.wait_for_timeout(1000)
+                    
+                    dropdown_item = await page.query_selector(
+                        ".autocomplete-suggestion, [class*='suggestion'] div, #suggestor-listbox [role='option'], .suggestor-wrapper [role='option'], [id*='listbox'] [role='option'], [class*='listbox'] [role='option'], .suggestor-box + div [role='option']"
+                    )
+                    if dropdown_item:
+                        await dropdown_item.click()
+                    else:
+                        await page.keyboard.press("Enter")
+                    await page.wait_for_timeout(3000)
+                except Exception as skill_err:
+                    print(f"Could not enter mandatory skill '{skill}': {skill_err}", flush=True)
 
-                # 3. Apply Notice Period (30 Days)
-                # Resdex v3 often has filters on the left or in 'More Filters'
+            # Type and add all optional skills
+            for skill in optional_skills:
                 try:
-                    await page.click("text=Notice Period")
-                    await page.click("text=30 Days")
-                except: pass
+                    el = await get_active_keywords_input()
+                    if not el:
+                        print(f"Warning: Could not locate keywords input to enter optional skill: {skill}")
+                        continue
+                    
+                    print(f"Adding optional skill: {skill}", flush=True)
+                    await el.focus()
+                    await el.fill("")
+                    await page.keyboard.type(skill, delay=50)
+                    await page.wait_for_timeout(1000)
+                    
+                    dropdown_item = await page.query_selector(
+                        ".autocomplete-suggestion, [class*='suggestion'] div, #suggestor-listbox [role='option'], .suggestor-wrapper [role='option'], [id*='listbox'] [role='option'], [class*='listbox'] [role='option'], .suggestor-box + div [role='option']"
+                    )
+                    if dropdown_item:
+                        await dropdown_item.click()
+                    else:
+                        await page.keyboard.press("Enter")
+                    await page.wait_for_timeout(500)
+                except Exception as skill_err:
+                    print(f"Could not enter optional skill '{skill}': {skill_err}", flush=True)
 
-                # 4. Apply Salary Filter (Exp * 3)
-                # We'll try to find the salary input
-                avg_exp = (experience_range[0] + experience_range[1]) / 2
+            # 2. Mark Mandatory Skills as Starred (Only the 2nd mandatory skill needs to be manually starred, since the 1st is starred by default)
+            if len(mandatory_skills) > 1:
+                skill_to_star = mandatory_skills[1]
+                try:
+                    tag = await page.wait_for_selector(
+                        f"button.star-tag-wrapper:has-text('{skill_to_star}'), button[aria-label='{skill_to_star}'], .tag-label:has-text('{skill_to_star}'), span:has-text('{skill_to_star}'), .tag:has-text('{skill_to_star}')", 
+                        timeout=3000
+                    )
+                    if tag:
+                        star_btn = await tag.query_selector("i.star, .star, .star-icon, [class*='star']")
+                        click_target = star_btn if star_btn else tag
+                        await click_target.click()
+                        print(f"Starred mandatory skill (2nd skill): {skill_to_star}", flush=True)
+                        await page.wait_for_timeout(500)
+                except Exception as star_err:
+                    print(f"Could not star mandatory skill {skill_to_star}: {star_err}", flush=True)
+
+            # 3. Add Experience Filter from JD
+            try:
+                print(f"Setting Experience Filter: {min_exp} to {max_exp} years...")
+                min_field = await page.wait_for_selector("input[placeholder*='Min'], #minExp, [name='minExp']", timeout=5000)
+                if min_field:
+                    await min_field.fill(str(min_exp))
+                max_field = await page.wait_for_selector("input[placeholder*='Max'], #maxExp, [name='maxExp']", timeout=5000)
+                if max_field:
+                    await max_field.fill(str(max_exp))
+            except Exception as exp_err:
+                print(f"Could not set experience filter: {exp_err}")
+
+            # 4. Location Search Input
+            target_location = query.get("location", "N/A")
+            if target_location and target_location != "N/A":
+                try:
+                    loc_input = await page.wait_for_selector(
+                        "input[name='locations'], input[placeholder*='location'], input[name*='location'], input[name='location']", 
+                        timeout=5000
+                    )
+                    if loc_input:
+                        await loc_input.focus()
+                        await loc_input.fill("")
+                        await page.keyboard.type(target_location, delay=50)
+                        await page.wait_for_timeout(1000)
+                        suggestion = await page.query_selector(
+                            ".autocomplete-suggestion, [class*='suggestion'] div, #suggestor-listbox [role='option'], .suggestor-wrapper [role='option'], [id*='listbox'] [role='option'], [class*='listbox'] [role='option']"
+                        )
+                        if suggestion:
+                            await suggestion.click()
+                        else:
+                            await page.keyboard.press("Enter")
+                        print(f"Location filter applied: {target_location}")
+                except Exception as loc_err:
+                    print(f"Could not apply Location filter: {loc_err}")
+
+            # 5. Apply Notice Period Checkbox
+            target_np = query.get("notice_period", "N/A")
+            if target_np and target_np != "N/A":
+                try:
+                    # In Resdex.html, notice period chips are under #noticePeriodTags
+                    # Map the target notice period text to one of the chip titles:
+                    # "0 - 15 days", "1 month", "2 months", "3 months", "Currently serving notice period"
+                    np_mapping = []
+                    np_lower = target_np.lower()
+                    if "immediate" in np_lower or "serving" in np_lower:
+                        np_mapping.append("currently serving notice period")
+                    if "15" in np_lower:
+                        np_mapping.append("0 - 15 days")
+                    if "30" in np_lower or "1 month" in np_lower:
+                        np_mapping.append("1 month")
+                    if "2 month" in np_lower:
+                        np_mapping.append("2 months")
+                    if "3 month" in np_lower:
+                        np_mapping.append("3 months")
+                        
+                    if np_mapping:
+                        chips = await page.query_selector_all("#noticePeriodTags .selectable-chip")
+                        for chip in chips:
+                            span = await chip.query_selector("span.txt")
+                            if span:
+                                title = (await span.evaluate("el => el.getAttribute('title') || el.textContent || ''")).strip().lower()
+                                is_selected = await chip.evaluate("el => el.classList.contains('selected')")
+                                
+                                should_select = False
+                                for target in np_mapping:
+                                    if target in title:
+                                        should_select = True
+                                        break
+                                
+                                if should_select and not is_selected:
+                                    print(f"Selecting notice period chip: {title}", flush=True)
+                                    await chip.evaluate("el => el.click()")
+                                    await page.wait_for_timeout(200)
+                                elif not should_select and is_selected:
+                                    # Don't unselect "Any" chip unless we are selecting a specific one
+                                    if "any" in title:
+                                        continue
+                                    print(f"Unselecting notice period chip: {title}", flush=True)
+                                    await chip.evaluate("el => el.click()")
+                                    await page.wait_for_timeout(200)
+                    print(f"Notice Period filter applied: {target_np}")
+                except Exception as np_err:
+                    print(f"Could not apply Notice Period filter: {np_err}")
+
+            # 6. Apply Salary Filter (Exp * 3)
+            try:
+                avg_exp = (min_exp + max_exp) / 2
                 target_salary = int(avg_exp * 3)
                 print(f"Applying Salary Filter: {target_salary} LPA")
-                # Selector for salary dropdown/input
-                
-                # Click Search
-                search_btn = await page.query_selector("button:has-text('Search candidates')")
-                if search_btn: await search_btn.click()
-                else: await page.keyboard.press("Enter")
-                
-                await page.wait_for_load_state("networkidle")
-                
-                # Handle Pagination if page_num > 1
-                if page_num > 1:
-                    for p_i in range(page_num - 1):
-                        next_btn = await page.query_selector(
-                            "[data-testid='next-page'], button[data-testid='next-page'], "
-                            "button:has-text('Next'), a:has-text('Next'), [aria-label='Next'], "
-                            ".ico-expand.next"
-                        )
-                        if next_btn:
-                            try:
-                                await next_btn.scroll_into_view_if_needed()
-                            except: pass
-                            await next_btn.click()
-                            await page.wait_for_timeout(5000)
-                        else:
-                            print(f"Could not find Next button for page pagination step {p_i + 2}")
-                            break
+            except:
+                pass
 
-                # 5. Extract Detailed Results (Top 10)
-                results = []
-                print("Waiting for results grid to stabilize...", flush=True)
-                await page.wait_for_timeout(10000)
+            # Click Search
+            search_btn = await page.query_selector("button:has-text('Search candidates')")
+            if search_btn:
+                await search_btn.click()
+            else:
+                await page.keyboard.press("Enter")
                 
-                # Try multiple card selectors for v3
-                card_selectors = [".tuple", ".tuple-container", "[class*='tuple']", ".candidate-card"]
-                cards = []
-                for sel in card_selectors:
-                    cards = await page.query_selector_all(sel)
-                    if cards:
-                        print(f"Found {len(cards)} cards using selector: {sel}")
-                        break
-                
-                if not cards:
-                    print("No candidate cards found. Results page might not have loaded correctly.")
-                    await page.screenshot(path="resdex_v3_no_results.png")
-                    return []
-
-                pool_candidates = []  # ALL candidates found on page (for 'Other Candidates' table)
-                deep_analyzed_names = set()  # Track who got deep-analyzed
-
-                for card in cards:
-                    try:
-                        # 1. Find name and link
-                        name_el = await card.query_selector(".name, .title, [class*='name']")
-                        name = (await name_el.inner_text()).strip() if name_el else "Unknown Candidate"
-                        if not name or name == "Unknown Candidate":
-                            continue
-                        
-                        link_el = await card.query_selector("a[href*='profile'], .name a")
-                        profile_url = await link_el.get_attribute("href") if link_el else None
-                        
-                        exp_el = await card.query_selector(".exp, [class*='exp']")
-                        exp_text = (await exp_el.inner_text()).strip() if exp_el else "N/A"
-                        
-                        skills_el = await card.query_selector(".key-skills, .may-know, .skill-container")
-                        context_text = (await skills_el.inner_text()).strip() if skills_el else ""
-
-                        np_el = await card.query_selector("span:has-text('days'), span:has-text('month'), [class*='notice']")
-                        np_text = (await np_el.inner_text()).strip() if np_el else "N/A"
-                        
-                        # Fallback to card text parsing if selector returns N/A (e.g. nested in generic div)
-                        if np_text == "N/A":
-                            card_txt = await card.inner_text()
-                            np_text = extract_notice_period_from_card_text(card_txt)
-
-                        # 2. Check candidate activity level from DOM
-                        activity_text = ""
+            await page.wait_for_load_state("networkidle")
+            
+            # Handle Pagination if page_num > 1
+            if page_num > 1:
+                for p_i in range(page_num - 1):
+                    next_btn = await page.query_selector(
+                        "[data-testid='next-page'], button[data-testid='next-page'], "
+                        "button:has-text('Next'), a:has-text('Next'), [aria-label='Next'], "
+                        ".ico-expand.next"
+                    )
+                    if next_btn:
                         try:
-                            # Search for elements containing 'Active' or class indicators
-                            activity_el = await card.query_selector("[class*='active-date'], .active-date-info, span:has-text('Active'), [class*='tuple-footer'] span:has-text('Active'), [class*='tuple-meta'] span:has-text('Active')")
-                            if activity_el:
-                                activity_text = await activity_el.inner_text()
-                            else:
-                                # Fallback to scanning lines of card text for 'Active'
-                                card_txt = await card.inner_text()
-                                for line in card_txt.split("\n"):
-                                    if "active" in line.lower():
-                                        activity_text = line
-                                        break
-                        except Exception as act_parse_err:
-                            print(f"Error checking activity status for {name}: {act_parse_err}", flush=True)
+                            await next_btn.click(timeout=3000)
+                        except Exception:
+                            await next_btn.evaluate("el => el.click()")
+                        await page.wait_for_timeout(5000)
+                    else:
+                        print(f"Could not find Next button for page pagination step {p_i + 2}")
+                        break
 
-                        activity_text = activity_text.strip()
-                        
-                        # 3. Apply Strict Active filter (<= 30 Days)
-                        if not is_candidate_active_in_30_days(activity_text):
-                            print(f"⏩ Filtering out {name} - inactive over 30 days: '{activity_text}'", flush=True)
-                            continue
-                            
-                        # 4. Apply Strict Notice Period filter (<= 30 Days / 1 Month)
-                        if not is_notice_period_within_30_days(np_text):
-                            print(f"⏩ Filtering out {name} - notice period is too long: '{np_text}'", flush=True)
-                            continue
+            # 5. Extract Detailed Results (Top 10)
+            results = []
+            print("Waiting for results grid to stabilize...", flush=True)
+            await page.wait_for_timeout(10000)
+            
+            # Try multiple card selectors for v3
+            card_selectors = [".tuple", ".tuple-container", "[class*='tuple']", ".candidate-card"]
+            cards = []
+            for sel in card_selectors:
+                cards = await page.query_selector_all(sel)
+                if cards:
+                    print(f"Found {len(cards)} cards using selector: {sel}")
+                    break
+            
+            if not cards:
+                print("No candidate cards found. Results page might not have loaded correctly.")
+                await page.screenshot(path="resdex_v3_no_results.png")
+                return []
 
-                        # 5. Always add to pool list if they pass the active and notice period filters
-                        full_profile_url = ("https://resdex.naukri.com" + profile_url) if profile_url and not profile_url.startswith("http") else (profile_url or page.url)
-                        if name not in [c["name"] for c in pool_candidates]:
-                            pool_candidates.append({
-                                "name": name,
-                                "exp": exp_text,
-                                "notice_period": np_text,
-                                "link": full_profile_url
-                            })
+            pool_candidates = []  # ALL candidates found on page (for 'Other Candidates' table)
+            deep_analyzed_names = set()  # Track who got deep-analyzed
 
-                        # 6. Stop deep-scraping if we already have 10 deep results
-                        if len(results) >= 10:
-                            continue
-
-                        phone_text = "Hidden"
-                        email_text = "Hidden"
-                        
-                        # DEEP EXTRACTION: Open Profile in new tab to read Experience & Projects (0 Credits Used)
-                        experience_text = ""
-                        if profile_url:
-                            if not profile_url.startswith("http"):
-                                profile_url = "https://resdex.naukri.com" + profile_url
-                            
-                            print(f"Opening profile for {name} to scrape experience...", flush=True)
-                            profile_page = await context.new_page()
-                            await profile_page.goto(profile_url, wait_until="domcontentloaded")
-                            await profile_page.wait_for_timeout(3000)
-                            
-                            try:
-                                # PRIORITY 1: Click "Attached CV" tab and extract the actual uploaded resume
-                                # This is what candidates like Alby Wilson use instead of filling Naukri profile fields
-                                attached_cv_text = ""
-                                cv_tab = await profile_page.query_selector("#tab-videoAndCv, button[id*='videoAndCv'], button:has-text('Attached CV')")
-                                if cv_tab:
-                                    cv_tab_selected = await cv_tab.get_attribute("aria-selected")
-                                    if cv_tab_selected != "true":
-                                        await cv_tab.click()
-                                        await profile_page.wait_for_timeout(2000)  # wait for tab content to load
-                                    
-                                    # Try to grab the resume text from the now-active CV tab panel
-                                    cv_panel_selectors = [
-                                        "[role='tabpanel'][id*='videoAndCv']",
-                                        "[aria-labelledby='tab-videoAndCv']",
-                                        ".cv-preview-container",
-                                        ".resume-preview-wrapper",
-                                        "[class*='cvPreview']",
-                                        "[class*='resumePreview']"
-                                    ]
-                                    for sel in cv_panel_selectors:
-                                        cv_el = await profile_page.query_selector(sel)
-                                        if cv_el:
-                                            txt = await cv_el.inner_text()
-                                            if txt and len(txt.strip()) > 100:
-                                                attached_cv_text = txt.strip()
-                                                print(f"✅ Scraped Attached CV tab content for {name} ({len(attached_cv_text)} chars).", flush=True)
-                                                break
-
-                                if attached_cv_text:
-                                    combined_texts = ["=== ATTACHED RESUME ===", attached_cv_text]
-                                    experience_text = "\n\n".join(combined_texts)
-                                else:
-                                    # PRIORITY 2: Profile detail tab — .profile-width-content (Naukri structured profile)
-                                    # Go back to the Profile detail tab if needed
-                                    profile_tab = await profile_page.query_selector("#tab-profile, button[id='tab-profile'], button:has-text('Profile detail')")
-                                    if profile_tab:
-                                        profile_tab_selected = await profile_tab.get_attribute("aria-selected")
-                                        if profile_tab_selected != "true":
-                                            await profile_tab.click()
-                                            await profile_page.wait_for_timeout(1500)
-
-                                    profile_content_el = await profile_page.query_selector(".profile-width-content, .profile-content")
-                                    if profile_content_el:
-                                        profile_full_text = await profile_content_el.inner_text()
-                                        if profile_full_text and len(profile_full_text.strip()) > 100:
-                                            combined_texts = ["=== NAUKRI PROFILE ===", profile_full_text.strip()]
-                                            experience_text = "\n\n".join(combined_texts)
-                                            print(f"⚠️ No attached CV — using Profile detail tab for {name} ({len(profile_full_text)} chars).", flush=True)
-
-                                    # PRIORITY 3: Individual work-exp-card elements
-                                    if not experience_text:
-                                        job_descs = []
-                                        desc_els = await profile_page.query_selector_all("div.work-exp-card div.desc")
-                                        for desc_el in desc_els:
-                                            txt = await desc_el.inner_text()
-                                            if txt:
-                                                job_descs.append(txt.strip())
-                                        desig_els = await profile_page.query_selector_all("div.work-exp-card div.desig")
-                                        for desig_el in desig_els:
-                                            txt = await desig_el.inner_text()
-                                            if txt:
-                                                job_descs.append(txt.strip())
-                                        project_descs = []
-                                        proj_els = await profile_page.query_selector_all(".cv-project, .project-details")
-                                        for proj_el in proj_els:
-                                            txt = await proj_el.inner_text()
-                                            if txt and len(txt.strip()) > 20:
-                                                project_descs.append(txt.strip())
-                                        combined_texts = []
-                                        if job_descs:
-                                            combined_texts.append("=== WORK EXPERIENCE ===")
-                                            combined_texts.extend(job_descs)
-                                        if project_descs:
-                                            combined_texts.append("=== PROJECTS ===")
-                                            combined_texts.extend(project_descs)
-                                        if not combined_texts:
-                                            body_el = await profile_page.query_selector("body")
-                                            if body_el:
-                                                body_txt = await body_el.inner_text()
-                                                if body_txt:
-                                                    combined_texts.append("=== RAW PROFILE TEXT ===")
-                                                    combined_texts.append(body_txt[:5000])
-                                        experience_text = "\n\n".join(combined_texts)
-                                        print(f"⚠️ Fell back to work-exp-card for {name}.", flush=True)
-
-                                print(f"\n==========================================")
-                                print(f"📄 SCRAPED TEXT FOR: {name}")
-                                print(f"==========================================")
-                                print(experience_text[:1000] if experience_text.strip() else "[NO TEXT FOUND]")
-                                print(f"==========================================\n")
-                            except Exception as scrape_err:
-                                print(f"Could not scrape DOM profile for {name}: {scrape_err}")
-                            
-                            await profile_page.close()
-
-                        results.append({
-                            "name": name.strip(),
-                            "exp": exp_text.strip(),
-                            "context": context_text.strip(),
-                            "notice_period": np_text.strip(),
-                            "phone": phone_text.strip(),
-                            "email": email_text.strip(),
-                            "link": profile_url or page.url,
-                            "experience_text": experience_text
-                        })
-                        deep_analyzed_names.add(name.strip())
-                    except Exception as e:
-                        print(f"Error extracting profile: {e}")
+            for card in cards:
+                try:
+                    # 1. Find name and link
+                    name_el = await card.query_selector(".name, .title, [class*='name']")
+                    name = (await name_el.inner_text()).strip() if name_el else "Unknown Candidate"
+                    if not name or name == "Unknown Candidate":
                         continue
-                
-                print(f"Successfully extracted {len(results)} deep-analyzed leads.")
-                
-                # Build 'Other Candidates' = pool_candidates minus the ones we deep-analyzed
-                other_candidates = [
-                    c for c in pool_candidates
-                    if c['name'] not in deep_analyzed_names
-                ]
-                print(f"Other candidates in pool (not deep-analyzed): {len(other_candidates)}", flush=True)
-                
-                return {"deep_results": results, "other_candidates": other_candidates}
-            return {"deep_results": [], "other_candidates": []}
+                    
+                    link_el = await card.query_selector("a[href*='profile'], .name a")
+                    profile_url = await link_el.get_attribute("href") if link_el else None
+                    
+                    exp_el = await card.query_selector(".exp, [class*='exp']")
+                    exp_text = (await exp_el.inner_text()).strip() if exp_el else "N/A"
+                    
+                    skills_el = await card.query_selector(".key-skills, .may-know, .skill-container")
+                    context_text = (await skills_el.inner_text()).strip() if skills_el else ""
+
+                    np_el = await card.query_selector("span:has-text('days'), span:has-text('month'), [class*='notice']")
+                    np_text = (await np_el.inner_text()).strip() if np_el else "N/A"
+                    
+                    # Fallback to card text parsing if selector returns N/A (e.g. nested in generic div)
+                    if np_text == "N/A":
+                        card_txt = await card.inner_text()
+                        np_text = extract_notice_period_from_card_text(card_txt)
+
+                    # 2. Check candidate activity level from DOM
+                    activity_text = ""
+                    try:
+                        # Search for elements containing 'Active' or class indicators
+                        activity_el = await card.query_selector("[class*='active-date'], .active-date-info, span:has-text('Active'), [class*='tuple-footer'] span:has-text('Active'), [class*='tuple-meta'] span:has-text('Active')")
+                        if activity_el:
+                            activity_text = await activity_el.inner_text()
+                        else:
+                            # Fallback to scanning lines of card text for 'Active'
+                            card_txt = await card.inner_text()
+                            for line in card_txt.split("\n"):
+                                if "active" in line.lower():
+                                    activity_text = line
+                                    break
+                    except Exception as act_parse_err:
+                        print(f"Error checking activity status for {name}: {act_parse_err}", flush=True)
+
+                    activity_text = activity_text.strip()
+                    
+                    # 3. Apply Strict Active filter (<= 30 Days)
+                    if not is_candidate_active_in_30_days(activity_text):
+                        print(f"⏩ Filtering out {name} - inactive over 30 days: '{activity_text}'", flush=True)
+                        continue
+                        
+                    # 4. Apply Strict Notice Period filter (<= 30 Days / 1 Month)
+                    if not is_notice_period_within_30_days(np_text):
+                        print(f"⏩ Filtering out {name} - notice period is too long: '{np_text}'", flush=True)
+                        continue
+
+                    # 5. Always add to pool list if they pass the active and notice period filters
+                    full_profile_url = ("https://resdex.naukri.com" + profile_url) if profile_url and not profile_url.startswith("http") else (profile_url or page.url)
+                    if name not in [c["name"] for c in pool_candidates]:
+                        pool_candidates.append({
+                            "name": name,
+                            "exp": exp_text,
+                            "notice_period": np_text,
+                            "link": full_profile_url
+                        })
+
+                    # 6. Stop deep-scraping if we already have 10 deep results
+                    if len(results) >= 10:
+                        continue
+
+                    phone_text = "Hidden"
+                    email_text = "Hidden"
+                    
+                    # DEEP EXTRACTION: Open Profile in new tab to read Experience & Projects (0 Credits Used)
+                    experience_text = ""
+                    if profile_url:
+                        if not profile_url.startswith("http"):
+                            profile_url = "https://resdex.naukri.com" + profile_url
+                        
+                        print(f"Opening profile for {name} to scrape experience...", flush=True)
+                        profile_page = await context.new_page()
+                        await profile_page.goto(profile_url, wait_until="domcontentloaded")
+                        await profile_page.wait_for_timeout(3000)
+                        
+                        try:
+                            # PRIORITY 1: Click "Attached CV" tab and extract the actual uploaded resume
+                            # This is what candidates like Alby Wilson use instead of filling Naukri profile fields
+                            attached_cv_text = ""
+                            cv_tab = await profile_page.query_selector("#tab-videoAndCv, button[id*='videoAndCv'], button:has-text('Attached CV')")
+                            if cv_tab:
+                                cv_tab_selected = await cv_tab.get_attribute("aria-selected")
+                                if cv_tab_selected != "true":
+                                    await cv_tab.click()
+                                    await profile_page.wait_for_timeout(2000)  # wait for tab content to load
+                                
+                                # Try to grab the resume text from the now-active CV tab panel
+                                cv_panel_selectors = [
+                                    "[role='tabpanel'][id*='videoAndCv']",
+                                    "[aria-labelledby='tab-videoAndCv']",
+                                    ".cv-preview-container",
+                                    ".resume-preview-wrapper",
+                                    "[class*='cvPreview']",
+                                    "[class*='resumePreview']"
+                                ]
+                                for sel in cv_panel_selectors:
+                                    cv_el = await profile_page.query_selector(sel)
+                                    if cv_el:
+                                        txt = await cv_el.inner_text()
+                                        if txt and len(txt.strip()) > 100:
+                                            attached_cv_text = txt.strip()
+                                            print(f"✅ Scraped Attached CV tab content for {name} ({len(attached_cv_text)} chars).", flush=True)
+                                            break
+
+                            if attached_cv_text:
+                                combined_texts = ["=== ATTACHED RESUME ===", attached_cv_text]
+                                experience_text = "\n\n".join(combined_texts)
+                            else:
+                                # PRIORITY 2: Profile detail tab — .profile-width-content (Naukri structured profile)
+                                # Go back to the Profile detail tab if needed
+                                profile_tab = await profile_page.query_selector("#tab-profile, button[id='tab-profile'], button:has-text('Profile detail')")
+                                if profile_tab:
+                                    profile_tab_selected = await profile_tab.get_attribute("aria-selected")
+                                    if profile_tab_selected != "true":
+                                        await profile_tab.click()
+                                        await profile_page.wait_for_timeout(1500)
+
+                                profile_content_el = await profile_page.query_selector(".profile-width-content, .profile-content")
+                                if profile_content_el:
+                                    profile_full_text = await profile_content_el.inner_text()
+                                    if profile_full_text and len(profile_full_text.strip()) > 100:
+                                        combined_texts = ["=== NAUKRI PROFILE ===", profile_full_text.strip()]
+                                        experience_text = "\n\n".join(combined_texts)
+                                        print(f"⚠️ No attached CV — using Profile detail tab for {name} ({len(profile_full_text)} chars).", flush=True)
+
+                                # PRIORITY 3: Individual work-exp-card elements
+                                if not experience_text:
+                                    job_descs = []
+                                    desc_els = await profile_page.query_selector_all("div.work-exp-card div.desc")
+                                    for desc_el in desc_els:
+                                        txt = await desc_el.inner_text()
+                                        if txt:
+                                            job_descs.append(txt.strip())
+                                    desig_els = await profile_page.query_selector_all("div.work-exp-card div.desig")
+                                    for desig_el in desig_els:
+                                        txt = await desig_el.inner_text()
+                                        if txt:
+                                            job_descs.append(txt.strip())
+                                    project_descs = []
+                                    proj_els = await profile_page.query_selector_all(".cv-project, .project-details")
+                                    for proj_el in proj_els:
+                                        txt = await proj_el.inner_text()
+                                        if txt and len(txt.strip()) > 20:
+                                            project_descs.append(txt.strip())
+                                    combined_texts = []
+                                    if job_descs:
+                                        combined_texts.append("=== WORK EXPERIENCE ===")
+                                        combined_texts.extend(job_descs)
+                                    if project_descs:
+                                        combined_texts.append("=== PROJECTS ===")
+                                        combined_texts.extend(project_descs)
+                                    if not combined_texts:
+                                        body_el = await profile_page.query_selector("body")
+                                        if body_el:
+                                            body_txt = await body_el.inner_text()
+                                            if body_txt:
+                                                combined_texts.append("=== RAW PROFILE TEXT ===")
+                                                combined_texts.append(body_txt[:5000])
+                                    experience_text = "\n\n".join(combined_texts)
+                                    print(f"⚠️ Fell back to work-exp-card for {name}.", flush=True)
+
+                            print(f"\n==========================================")
+                            print(f"📄 SCRAPED TEXT FOR: {name}")
+                            print(f"==========================================")
+                            print(experience_text[:1000] if experience_text.strip() else "[NO TEXT FOUND]")
+                            print(f"==========================================\n")
+                        except Exception as scrape_err:
+                            print(f"Could not scrape DOM profile for {name}: {scrape_err}")
+                        
+                        await profile_page.close()
+
+                    results.append({
+                        "name": name.strip(),
+                        "exp": exp_text.strip(),
+                        "context": context_text.strip(),
+                        "notice_period": np_text.strip(),
+                        "phone": phone_text.strip(),
+                        "email": email_text.strip(),
+                        "link": profile_url or page.url,
+                        "experience_text": experience_text
+                    })
+                    deep_analyzed_names.add(name.strip())
+                except Exception as e:
+                    print(f"Error extracting profile: {e}")
+                    continue
+            
+            print(f"Successfully extracted {len(results)} deep-analyzed leads.")
+            
+            # Build 'Other Candidates' = pool_candidates minus the ones we deep-analyzed
+            other_candidates = [
+                c for c in pool_candidates
+                if c['name'] not in deep_analyzed_names
+            ]
+            print(f"Other candidates in pool (not deep-analyzed): {len(other_candidates)}", flush=True)
+            
+            return {"deep_results": results, "other_candidates": other_candidates}
         except Exception as e:
             print(f"Live search error: {e}")
             try:
@@ -1871,11 +1401,21 @@ async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
 def simulate_naukri_search(data):
     primary = data.get('primary_keywords', [])
     secondary = data.get('secondary_keywords', [])
-    boolean = data.get('boolean_query', "")
     
-    # We'll return the keywords so the frontend knows what we searched for
+    # Construct a clean keyword chip display string for the UI
+    mand_skills = data.get('mandatory_skills', [])
+    opt_skills = data.get('optional_skills', [])
+    
+    display_parts = []
+    if mand_skills:
+        display_parts.append(f"Mandatory: {', '.join(mand_skills)}")
+    if opt_skills:
+        display_parts.append(f"Optional: {', '.join(opt_skills)}")
+        
+    boolean_display = " | ".join(display_parts) if display_parts else " ".join(primary)
+    
     return {
         "keywords_used": primary + secondary,
-        "boolean_query": boolean,
-        "simulated_leads": [] # Will be populated by the live search in app.py
+        "boolean_query": boolean_display,
+        "simulated_leads": []
     }

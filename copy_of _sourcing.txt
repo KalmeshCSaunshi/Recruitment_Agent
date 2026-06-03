@@ -1,0 +1,857 @@
+# import requests
+# import json
+# import urllib.parse
+# import asyncio
+# from playwright.async_api import async_playwright
+
+# OLLAMA_API_URL = 'http://localhost:11434/api/generate'
+# MODEL_NAME = 'llama3:latest'
+
+# def extract_json(text):
+#     if not text: return None
+#     try:
+#         # 1. Direct parse
+#         return json.loads(text)
+#     except:
+#         try:
+#             # 2. Find anything between { }
+#             match = re.search(r'\{.*\}', text, re.DOTALL)
+#             if match:
+#                 clean = match.group(0)
+#                 # Quick fixes
+#                 clean = clean.replace("'", '"')
+#                 clean = re.sub(r'(\w+):', r'"\1":', clean)
+#                 return json.loads(clean)
+#         except:
+#             return None
+
+# def get_search_keywords(jd):
+#     import re
+#     prompt = f"Identify 3-5 technical keywords and a boolean query for this JD. Return ONLY JSON: {{\"primary_keywords\": [], \"boolean_query\": \"\"}}\n\nJD: {jd[:2000]}"
+#     try:
+#         payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False}
+#         response = requests.post(OLLAMA_API_URL, json=payload, timeout=60)
+#         data = extract_json(response.json().get('response', ''))
+#         if data: return data
+#     except: pass
+#     return {"primary_keywords": ["Software"], "boolean_query": "Software"}
+
+# async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
+#     import os, re, random
+#     PROFILE_DIR = "./naukri_profile"
+#     async with async_playwright() as p:
+#         context = await p.chromium.launch_persistent_context(
+#             user_data_dir=PROFILE_DIR,
+#             headless=True,
+#             ignore_https_errors=True,
+#             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+#             args=[
+#                 "--disable-http2", 
+#                 "--no-sandbox",
+#                 "--disable-setuid-sandbox",
+#                 "--disable-blink-features=AutomationControlled",
+#                 "--disable-infobars",
+#                 "--window-position=0,0",
+#                 "--window-size=1280,720",
+#                 "--disable-features=IsolateOrigins,site-per-process",
+#                 "--force-fieldtrials=HTTP2ScaleHolBlocking/Disabled"
+#             ]
+#         )
+#         page = context.pages[0] if context.pages else await context.new_page()
+
+#         try:
+#             # Anti-bot protections
+#             await page.add_init_script("""
+#             Object.defineProperty(navigator, 'webdriver', {
+#                 get: () => undefined
+#             });
+
+#             window.chrome = {
+#                 runtime: {}
+#             };
+
+#             Object.defineProperty(navigator, 'plugins', {
+#                 get: () => [1, 2, 3, 4, 5]
+#             });
+
+#             Object.defineProperty(navigator, 'languages', {
+#                     get: () => ['en-US', 'en']
+#                 });
+#             """)
+
+#             print(f"Starting live search for: {query}")
+
+#             try:
+#                 # Retry logic for navigation
+#                 for attempt in range(3):
+#                     try:
+#                         print(f"Navigation attempt {attempt+1}...")
+#                         await page.goto("https://www.naukri.com", wait_until="commit", timeout=30000)
+#                         await asyncio.sleep(2)
+#                         await page.goto("https://resdex.naukri.com/v3", wait_until="load", timeout=60000)
+#                         print("Navigatedboolean to Resdex successfully.")
+#                         break
+#                     except Exception as e:
+#                         print(f"Attempt {attempt+1} failed: {e}")
+#                         if attempt == 2: raise e
+#                         await asyncio.sleep(5)
+#             except Exception as e:
+#                 print(f"All navigation attempts failed: {e}")
+#                 try:
+#                     await page.screenshot(path="final_timeout.png", timeout=5000)
+#                 except:
+#                     pass
+#                 return []
+# import requests
+# import json
+# import urllib.parse
+# import asyncio
+# from playwright.async_api import async_playwright
+
+# OLLAMA_API_URL = 'http://localhost:11434/api/generate'
+# MODEL_NAME = 'llama3:latest'
+
+# def extract_json(text):
+#     if not text: return None
+#     try:
+#         # 1. Direct parse
+#         return json.loads(text)
+#     except:
+#         try:
+#             # 2. Find anything between { }
+#             match = re.search(r'\{.*\}', text, re.DOTALL)
+#             if match:
+#                 clean = match.group(0)
+#                 # Quick fixes
+#                 clean = clean.replace("'", '"')
+#                 clean = re.sub(r'(\w+):', r'"\1":', clean)
+#                 return json.loads(clean)
+#         except:
+#             return None
+
+# def get_search_keywords(jd):
+#     import re
+#     prompt = f"Identify 3-5 technical keywords and a boolean query for this JD. Return ONLY JSON: {{\"primary_keywords\": [], \"boolean_query\": \"\"}}\n\nJD: {jd[:2000]}"
+#     try:
+#         payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False}
+#         response = requests.post(OLLAMA_API_URL, json=payload, timeout=60)
+#         data = extract_json(response.json().get('response', ''))
+#         if data: return data
+#     except: pass
+#     return {"primary_keywords": ["Software"], "boolean_query": "Software"}
+
+# async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
+#     import os, re, random
+#     PROFILE_DIR = "./naukri_profile"
+#     async with async_playwright() as p:
+#         context = await p.chromium.launch_persistent_context(
+#             user_data_dir=PROFILE_DIR,
+#             headless=True,
+#             ignore_https_errors=True,
+#             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+#             args=[
+#                 "--disable-http2", 
+#                 "--no-sandbox",
+#                 "--disable-setuid-sandbox",
+#                 "--disable-blink-features=AutomationControlled",
+#                 "--disable-infobars",
+#                 "--window-position=0,0",
+#                 "--window-size=1280,720",
+#                 "--disable-features=IsolateOrigins,site-per-process",
+#                 "--force-fieldtrials=HTTP2ScaleHolBlocking/Disabled"
+#             ]
+#         )
+#         page = context.pages[0] if context.pages else await context.new_page()
+
+#         try:
+#             # Anti-bot protections
+#             await page.add_init_script("""
+#             Object.defineProperty(navigator, 'webdriver', {
+#                 get: () => undefined
+#             });
+
+#             window.chrome = {
+#                 runtime: {}
+#             };
+
+#             Object.defineProperty(navigator, 'plugins', {
+#                 get: () => [1, 2, 3, 4, 5]
+#             });
+
+#             Object.defineProperty(navigator, 'languages', {
+#                     get: () => ['en-US', 'en']
+#                 });
+#             """)
+
+#             print(f"Starting live search for: {query}")
+
+#             try:
+#                 # Retry logic for navigation
+#                 for attempt in range(3):
+#                     try:
+#                         print(f"Navigation attempt {attempt+1}...")
+#                         await page.goto("https://www.naukri.com", wait_until="commit", timeout=30000)
+#                         await asyncio.sleep(2)
+#                         await page.goto("https://resdex.naukri.com/v3", wait_until="load", timeout=60000)
+#                         print("Navigated to Resdex successfully.")
+#                         break
+#                     except Exception as e:
+#                         print(f"Attempt {attempt+1} failed: {e}")
+#                         if attempt == 2: raise e
+#                         await asyncio.sleep(5)
+#             except Exception as e:
+#                 print(f"All navigation attempts failed: {e}")
+#                 try:
+#                     await page.screenshot(path="final_timeout.png", timeout=5000)
+#                 except:
+#                     pass
+#                 return []
+
+#             # Wait for page to be ready
+#             await asyncio.sleep(5)
+#             await page.screenshot(path="after_load.png")
+#             print(f"DEBUG: Current URL: {page.url}")
+
+#             if "login" in page.url.lower():
+#                 print("Session expired or redirected to login. Please log in manually in the popup.")
+#                 await asyncio.sleep(30) # Give time to login
+
+#             # Try multiple ways to find the keyword input
+#             keyword_selectors = [
+#                 "input[placeholder*='skills']",
+#                 "input[placeholder*='Keywords']",
+#                 "#skill-input",
+#                 ".keyword-input",
+#                 "input[name='keywords']",
+#                 "input[name='ezKeywordsAny']",
+#                 "input[type='text']"
+#             ]
+            
+#             search_input = None
+#             for selector in keyword_selectors:
+#                 try:
+#                     search_input = await page.wait_for_selector(selector, timeout=5000)
+#                     if search_input:
+#                         print(f"Found search input: {selector}")
+#                         break
+#                 except:
+#                     continue
+
+#             if not search_input:
+#                 print("Search input not found. Trying manual Tab + Type...")
+#                 await page.keyboard.press("Tab")
+#                 await page.keyboard.type(query)
+#             else:
+#                 await search_input.click()
+#                 await asyncio.sleep(1)
+#                 await search_input.fill(query)
+#                 print(f"Keywords entered: {query}")
+
+#             await asyncio.sleep(1)
+#             await page.keyboard.press("Enter")
+
+#             # Search Button (Backup)
+#             try:
+#                 search_btn_selectors = ["button:has-text('Search')", ".search-btn", "#search-button"]
+#                 for btn in search_btn_selectors:
+#                     if await page.is_visible(btn):
+#                         await page.click(btn)
+#                         print(f"Clicked search button: {btn}")
+#                         break
+#             except:
+#                 pass
+
+#             print("Waiting for results...")
+#             await asyncio.sleep(10)
+
+#             # Pagination
+#             if page_num > 1:
+#                 for _ in range(page_num - 1):
+#                     try:
+#                         await page.click("text=Next")
+#                         await asyncio.sleep(5)
+#                     except:
+#                         break
+
+#             # Candidate Cards
+#             card_selectors = [".tuple", ".tuple-container", ".candidate-card", "[class*='tuple']"]
+#             cards = []
+#             for selector in card_selectors:
+#                 try:
+#                     cards = await page.query_selector_all(selector)
+#                     if cards:
+#                         print(f"Found {len(cards)} cards.")
+#                         break
+#                 except:
+#                     pass
+
+#             results = []
+#             if not cards:
+#                 print("No candidate cards found.")
+#                 await page.screenshot(path="no_results.png")
+#                 return []
+
+#             for index, card in enumerate(cards[:10], start=1):
+#                 try:
+#                     print(f"Processing candidate {index}")
+#                     name = "Candidate " + str(index)
+#                     exp_text = "N/A"
+#                     np_text = "N/A"
+#                     profile_url = None
+
+#                     # Try to get real name
+#                     name_el = await card.query_selector(".name, .title, .tuple-name, .name-text, [class*='name']")
+#                     if name_el:
+#                         name = (await name_el.inner_text()).strip()
+
+#                     # Experience
+#                     try:
+#                         exp_el = await card.query_selector(".exp, .tuple-exp, .exp-text, [class*='exp']")
+#                         if exp_el:
+#                             exp_text = (await exp_el.inner_text()).strip()
+#                     except:
+#                         pass
+
+#                     # Notice Period
+#                     try:
+#                         np_el = await card.query_selector(".tuple-np, .np-text, [class*='notice'], [class*='np']")
+#                         if np_el:
+#                             np_text = (await np_el.inner_text()).strip()
+#                     except:
+#                         pass
+#                     # Skills
+#                     try:
+#                         skills_el = await card.query_selector(".key-skills, .skill-container")
+#                         if skills_el:
+#                             context_text = (await skills_el.inner_text()).strip()
+#                         else:
+#                             context_text = ""
+#                     except:
+#                         context_text = ""
+
+#                     # Profile URL
+#                     try:
+#                         link_el = await card.query_selector("a")
+#                         if link_el:
+#                             profile_url = await link_el.get_attribute("href")
+#                             if profile_url and not profile_url.startswith("http"):
+#                                 profile_url = "https://resdex.naukri.com" + profile_url
+#                     except:
+#                         pass
+
+#                     email_text = "Hidden"
+#                     phone_text = "Hidden"
+
+#                     # Results Collection
+#                     results.append({
+#                         "name": name,
+#                         "exp": exp_text,
+#                         "context": context_text,
+#                         "notice_period": np_text,
+#                         "phone": phone_text,
+#                         "email": email_text,
+#                         "link": profile_url or page.url
+#                     })
+
+#                     print(f"Extracted: {name}")
+#                     await asyncio.sleep(2)
+
+#                 except Exception as e:
+#                     print(f"Error extracting candidate {index}: {e}")
+
+#             print(f"Successfully extracted {len(results)} leads.")
+#             return {
+#                 "leads": results,
+#                 "final_url": page.url
+#             }
+
+#         except Exception as e:
+#             print(f"Live search error: {e}")
+#             try:
+#                 await page.screenshot(path="live_search_error.png")
+#             except:
+#                 pass
+#             return [{"error": f"Search failed: {str(e)}"}]
+
+#         finally:
+#             await context.close()
+
+# def simulate_naukri_search(data):
+#     primary = data.get('primary_keywords', [])
+#     secondary = data.get('secondary_keywords', [])
+#     boolean = data.get('boolean_query', "")
+    
+#     # We'll return the keywords so the frontend knows what we searched for
+#     return {
+#         "keywords_used": primary + secondary,
+#         "boolean_query": boolean,
+#         "simulated_leads": [] # Will be populated by the live search in app.py
+#     }# import requests
+# import json
+# import urllib.parse
+# import asyncio
+# from playwright.async_api import async_playwright
+
+# OLLAMA_API_URL = 'http://localhost:11434/api/generate'
+# MODEL_NAME = 'llama3:latest'
+
+# def extract_json(text):
+#     if not text: return None
+#     try:
+#         # 1. Direct parse
+#         return json.loads(text)
+#     except:
+#         try:
+#             # 2. Find anything between { }
+#             match = re.search(r'\{.*\}', text, re.DOTALL)
+#             if match:
+#                 clean = match.group(0)
+#                 # Quick fixes
+#                 clean = clean.replace("'", '"')
+#                 clean = re.sub(r'(\w+):', r'"\1":', clean)
+#                 return json.loads(clean)
+#         except:
+#             return None
+
+# def get_search_keywords(jd):
+#     import re
+#     prompt = f"Identify 3-5 technical keywords and a boolean query for this JD. Return ONLY JSON: {{\"primary_keywords\": [], \"boolean_query\": \"\"}}\n\nJD: {jd[:2000]}"
+#     try:
+#         payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False}
+#         response = requests.post(OLLAMA_API_URL, json=payload, timeout=60)
+#         data = extract_json(response.json().get('response', ''))
+#         if data: return data
+#     except: pass
+#     return {"primary_keywords": ["Software"], "boolean_query": "Software"}
+
+# async def perform_authenticated_search(query, min_exp=2, max_exp=8, page_num=1):
+#     import os, re, random
+#     PROFILE_DIR = "./naukri_profile"
+#     async with async_playwright() as p:
+#         context = await p.chromium.launch_persistent_context(
+#             user_data_dir=PROFILE_DIR,
+#             headless=True,
+#             ignore_https_errors=True,
+#             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+#             args=[
+#                 "--disable-http2", 
+#                 "--no-sandbox",
+#                 "--disable-setuid-sandbox",
+#                 "--disable-blink-features=AutomationControlled",
+#                 "--disable-infobars",
+#                 "--window-position=0,0",
+#                 "--window-size=1280,720",
+#                 "--disable-features=IsolateOrigins,site-per-process",
+#                 "--force-fieldtrials=HTTP2ScaleHolBlocking/Disabled"
+#             ]
+#         )
+#         page = context.pages[0] if context.pages else await context.new_page()
+
+#         try:
+#             # Anti-bot protections
+#             await page.add_init_script("""
+#             Object.defineProperty(navigator, 'webdriver', {
+#                 get: () => undefined
+#             });
+
+#             window.chrome = {
+#                 runtime: {}
+#             };
+
+#             Object.defineProperty(navigator, 'plugins', {
+#                 get: () => [1, 2, 3, 4, 5]
+#             });
+
+#             Object.defineProperty(navigator, 'languages', {
+#                     get: () => ['en-US', 'en']
+#                 });
+#             """)
+
+#             print(f"Starting live search for: {query}")
+
+#             try:
+#                 # Retry logic for navigation
+#                 for attempt in range(3):
+#                     try:
+#                         print(f"Navigation attempt {attempt+1}...")
+#                         await page.goto("https://www.naukri.com", wait_until="commit", timeout=30000)
+#                         await asyncio.sleep(2)
+#                         await page.goto("https://resdex.naukri.com/v3", wait_until="load", timeout=60000)
+#                         print("Navigated to Resdex successfully.")
+#                         break
+#                     except Exception as e:
+#                         print(f"Attempt {attempt+1} failed: {e}")
+#                         if attempt == 2: raise e
+#                         await asyncio.sleep(5)
+#             except Exception as e:
+#                 print(f"All navigation attempts failed: {e}")
+#                 try:
+#                     await page.screenshot(path="final_timeout.png", timeout=5000)
+#                 except:
+#                     pass
+#                 return []
+
+#             # Wait for page to be ready
+#             await asyncio.sleep(5)
+#             await page.screenshot(path="after_load.png")
+#             print(f"DEBUG: Current URL: {page.url}")
+
+#             if "login" in page.url.lower():
+#                 print("Session expired or redirected to login. Please log in manually in the popup.")
+#                 await asyncio.sleep(30) # Give time to login
+
+#             # Try multiple ways to find the keyword input
+#             keyword_selectors = [
+#                 "input[placeholder*='skills']",
+#                 "input[placeholder*='Keywords']",
+#                 "#skill-input",
+#                 ".keyword-input",
+#                 "input[name='keywords']",
+#                 "input[name='ezKeywordsAny']",
+#                 "input[type='text']"
+#             ]
+            
+#             search_input = None
+#             for selector in keyword_selectors:
+#                 try:
+#                     search_input = await page.wait_for_selector(selector, timeout=5000)
+#                     if search_input:
+#                         print(f"Found search input: {selector}")
+#                         break
+#                 except:
+#                     continue
+
+#             if not search_input:
+#                 print("Search input not found. Trying manual Tab + Type...")
+#                 await page.keyboard.press("Tab")
+#                 await page.keyboard.type(query)
+#             else:
+#                 await search_input.click()
+#                 await asyncio.sleep(1)
+#                 await search_input.fill(query)
+#                 print(f"Keywords entered: {query}")
+
+#             await asyncio.sleep(1)
+#             await page.keyboard.press("Enter")
+
+#             # Search Button (Backup)
+#             try:
+#                 search_btn_selectors = ["button:has-text('Search')", ".search-btn", "#search-button"]
+#                 for btn in search_btn_selectors:
+#                     if await page.is_visible(btn):
+#                         await page.click(btn)
+#                         print(f"Clicked search button: {btn}")
+#                         break
+#             except:
+#                 pass
+
+#             print("Waiting for results...")
+#             await asyncio.sleep(10)
+
+#             # Pagination
+#             if page_num > 1:
+#                 for _ in range(page_num - 1):
+#                     try:
+#                         await page.click("text=Next")
+#                         await asyncio.sleep(5)
+#                     except:
+#                         break
+
+#             # Candidate Cards
+#             card_selectors = [".tuple", ".tuple-container", ".candidate-card", "[class*='tuple']"]
+#             cards = []
+#             for selector in card_selectors:
+#                 try:
+#                     cards = await page.query_selector_all(selector)
+#                     if cards:
+#                         print(f"Found {len(cards)} cards.")
+#                         break
+#                 except:
+#                     pass
+
+#             results = []
+#             if not cards:
+#                 print("No candidate cards found.")
+#                 await page.screenshot(path="no_results.png")
+#                 return []
+
+#             for index, card in enumerate(cards[:10], start=1):
+#                 try:
+#                     print(f"Processing candidate {index}")
+#                     name = "Candidate " + str(index)
+#                     exp_text = "N/A"
+#                     np_text = "N/A"
+#                     profile_url = None
+
+#                     # Try to get real name
+#                     name_el = await card.query_selector(".name, .title, .tuple-name, .name-text, [class*='name']")
+#                     if name_el:
+#                         name = (await name_el.inner_text()).strip()
+
+#                     # Experience
+#                     try:
+#                         exp_el = await card.query_selector(".exp, .tuple-exp, .exp-text, [class*='exp']")
+#                         if exp_el:
+#                             exp_text = (await exp_el.inner_text()).strip()
+#                     except:
+#                         pass
+
+#                     # Notice Period
+#                     try:
+#                         np_el = await card.query_selector(".tuple-np, .np-text, [class*='notice'], [class*='np']")
+#                         if np_el:
+#                             np_text = (await np_el.inner_text()).strip()
+#                     except:
+#                         pass
+#                     # Skills
+#                     try:
+#                         skills_el = await card.query_selector(".key-skills, .skill-container")
+#                         if skills_el:
+#                             context_text = (await skills_el.inner_text()).strip()
+#                         else:
+#                             context_text = ""
+#                     except:
+#                         context_text = ""
+
+#                     # Profile URL
+#                     try:
+#                         link_el = await card.query_selector("a")
+#                         if link_el:
+#                             profile_url = await link_el.get_attribute("href")
+#                             if profile_url and not profile_url.startswith("http"):
+#                                 profile_url = "https://resdex.naukri.com" + profile_url
+#                     except:
+#                         pass
+
+#                     email_text = "Hidden"
+#                     phone_text = "Hidden"
+
+#                     # Results Collection
+#                     results.append({
+#                         "name": name,
+#                         "exp": exp_text,
+#                         "context": context_text,
+#                         "notice_period": np_text,
+#                         "phone": phone_text,
+#                         "email": email_text,
+#                         "link": profile_url or page.url
+#                     })
+
+#                     print(f"Extracted: {name}")
+#                     await asyncio.sleep(2)
+
+#                 except Exception as e:
+#                     print(f"Error extracting candidate {index}: {e}")
+
+#             print(f"Successfully extracted {len(results)} leads.")
+#             return {
+#                 "leads": results,
+#                 "final_url": page.url
+#             }
+
+#         except Exception as e:
+#             print(f"Live search error: {e}")
+#             try:
+#                 await page.screenshot(path="live_search_error.png")
+#             except:
+#                 pass
+#             return [{"error": f"Search failed: {str(e)}"}]
+
+#         finally:
+#             await context.close()
+
+# def simulate_naukri_search(data):
+#     primary = data.get('primary_keywords', [])
+#     secondary = data.get('secondary_keywords', [])
+#     boolean = data.get('boolean_query', "")
+    
+#     # We'll return the keywords so the frontend knows what we searched for
+#     return {
+#         "keywords_used": primary + secondary,
+#         "boolean_query": boolean,
+#         "simulated_leads": [] # Will be populated by the live search in app.py
+#     }
+
+
+
+
+#             # Wait for page to be ready
+#             await asyncio.sleep(5)
+#             await page.screenshot(path="after_load.png")
+#             print(f"DEBUG: Current URL: {page.url}")
+
+#             if "login" in page.url.lower():
+#                 print("Session expired or redirected to login. Please log in manually in the popup.")
+#                 await asyncio.sleep(30) # Give time to login
+
+#             # Try multiple ways to find the keyword input
+#             keyword_selectors = [
+#                 "input[placeholder*='skills']",
+#                 "input[placeholder*='Keywords']",
+#                 "#skill-input",
+#                 ".keyword-input",
+#                 "input[name='keywords']",
+#                 "input[name='ezKeywordsAny']",
+#                 "input[type='text']"
+#             ]
+            
+#             search_input = None
+#             for selector in keyword_selectors:
+#                 try:
+#                     search_input = await page.wait_for_selector(selector, timeout=5000)
+#                     if search_input:
+#                         print(f"Found search input: {selector}")
+#                         break
+#                 except:
+#                     continue
+
+#             if not search_input:
+#                 print("Search input not found. Trying manual Tab + Type...")
+#                 await page.keyboard.press("Tab")
+#                 await page.keyboard.type(query)
+#             else:
+#                 await search_input.click()
+#                 await asyncio.sleep(1)
+#                 await search_input.fill(query)
+#                 print(f"Keywords entered: {query}")
+
+#             await asyncio.sleep(1)
+#             await page.keyboard.press("Enter")
+
+#             # Search Button (Backup)
+#             try:
+#                 search_btn_selectors = ["button:has-text('Search')", ".search-btn", "#search-button"]
+#                 for btn in search_btn_selectors:
+#                     if await page.is_visible(btn):
+#                         await page.click(btn)
+#                         print(f"Clicked search button: {btn}")
+#                         break
+#             except:
+#                 pass
+
+#             print("Waiting for results...")
+#             await asyncio.sleep(10)
+
+#             # Pagination
+#             if page_num > 1:
+#                 for _ in range(page_num - 1):
+#                     try:
+#                         await page.click("text=Next")
+#                         await asyncio.sleep(5)
+#                     except:
+#                         break
+
+#             # Candidate Cards
+#             card_selectors = [".tuple", ".tuple-container", ".candidate-card", "[class*='tuple']"]
+#             cards = []
+#             for selector in card_selectors:
+#                 try:
+#                     cards = await page.query_selector_all(selector)
+#                     if cards:
+#                         print(f"Found {len(cards)} cards.")
+#                         break
+#                 except:
+#                     pass
+
+#             results = []
+#             if not cards:
+#                 print("No candidate cards found.")
+#                 await page.screenshot(path="no_results.png")
+#                 return []
+
+#             for index, card in enumerate(cards[:10], start=1):
+#                 try:
+#                     print(f"Processing candidate {index}")
+#                     name = "Candidate " + str(index)
+#                     exp_text = "N/A"
+#                     np_text = "N/A"
+#                     profile_url = None
+
+#                     # Try to get real name
+#                     name_el = await card.query_selector(".name, .title, .tuple-name, .name-text, [class*='name']")
+#                     if name_el:
+#                         name = (await name_el.inner_text()).strip()
+
+#                     # Experience
+#                     try:
+#                         exp_el = await card.query_selector(".exp, .tuple-exp, .exp-text, [class*='exp']")
+#                         if exp_el:
+#                             exp_text = (await exp_el.inner_text()).strip()
+#                     except:
+#                         pass
+
+#                     # Notice Period
+#                     try:
+#                         np_el = await card.query_selector(".tuple-np, .np-text, [class*='notice'], [class*='np']")
+#                         if np_el:
+#                             np_text = (await np_el.inner_text()).strip()
+#                     except:
+#                         pass
+#                     # Skills
+#                     try:
+#                         skills_el = await card.query_selector(".key-skills, .skill-container")
+#                         if skills_el:
+#                             context_text = (await skills_el.inner_text()).strip()
+#                         else:
+#                             context_text = ""
+#                     except:
+#                         context_text = ""
+
+#                     # Profile URL
+#                     try:
+#                         link_el = await card.query_selector("a")
+#                         if link_el:
+#                             profile_url = await link_el.get_attribute("href")
+#                             if profile_url and not profile_url.startswith("http"):
+#                                 profile_url = "https://resdex.naukri.com" + profile_url
+#                     except:
+#                         pass
+
+#                     email_text = "Hidden"
+#                     phone_text = "Hidden"
+
+#                     # Results Collection
+#                     results.append({
+#                         "name": name,
+#                         "exp": exp_text,
+#                         "context": context_text,
+#                         "notice_period": np_text,
+#                         "phone": phone_text,
+#                         "email": email_text,
+#                         "link": profile_url or page.url
+#                     })
+
+#                     print(f"Extracted: {name}")
+#                     await asyncio.sleep(2)
+
+#                 except Exception as e:
+#                     print(f"Error extracting candidate {index}: {e}")
+
+#             print(f"Successfully extracted {len(results)} leads.")
+#             return {
+#                 "leads": results,
+#                 "final_url": page.url
+#             }
+
+#         except Exception as e:
+#             print(f"Live search error: {e}")
+#             try:
+#                 await page.screenshot(path="live_search_error.png")
+#             except:
+#                 pass
+#             return [{"error": f"Search failed: {str(e)}"}]
+
+#         finally:
+#             await context.close()
+
+# def simulate_naukri_search(data):
+#     primary = data.get('primary_keywords', [])
+#     secondary = data.get('secondary_keywords', [])
+#     boolean = data.get('boolean_query', "")
+    
+#     # We'll return the keywords so the frontend knows what we searched for
+#     return {
+#         "keywords_used": primary + secondary,
+#         "boolean_query": boolean,
+#         "simulated_leads": [] # Will be populated by the live search in app.py
+#     }
