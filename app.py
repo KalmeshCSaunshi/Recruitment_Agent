@@ -40,7 +40,20 @@ def normalize_skill(skill: str) -> str:
 
 
 
+def is_keyword_in_text(kw: str, text: str) -> bool:
+    kw = kw.strip().lower()
+    text = text.lower()
+    if not kw or not text:
+        return False
+    pattern = rf"(?<![a-zA-Z0-9_-]){re.escape(kw)}(?![a-zA-Z0-9_-])"
+    return bool(re.search(pattern, text))
+
+
 def market_analyze_candidate(lead: dict, requirements: list, jd_min_exp: int = 2, jd_max_exp: int = 10) -> dict:
+    if jd_min_exp is None:
+        jd_min_exp = 2
+    if jd_max_exp is None:
+        jd_max_exp = 10
     """
     Lightweight DETERMINISTIC-ONLY scorer for market analysis.
     Uses candidate's skills + current role text as the match surface.
@@ -65,18 +78,18 @@ def market_analyze_candidate(lead: dict, requirements: list, jd_min_exp: int = 2
 
         for kw in valid_keywords:
             # 1. Direct match
-            if kw in experience_text:
+            if is_keyword_in_text(kw, experience_text):
                 found = True
                 matching_keyword = kw
                 break
             # 2. Singular form
-            if kw.endswith('s') and len(kw) > 3 and kw[:-1] in experience_text:
+            if kw.endswith('s') and len(kw) > 3 and is_keyword_in_text(kw[:-1], experience_text):
                 found = True
                 matching_keyword = kw[:-1]
                 break
             # 3. Multi-word: all sub-words present
             sub_words = [w.strip() for w in kw.split() if len(w.strip()) > 1]
-            if len(sub_words) > 1 and all(w in experience_text for w in sub_words):
+            if len(sub_words) > 1 and all(is_keyword_in_text(w, experience_text) for w in sub_words):
                 found = True
                 matching_keyword = sub_words[0]
                 break
@@ -159,6 +172,8 @@ def market_analyze_candidate(lead: dict, requirements: list, jd_min_exp: int = 2
         "matched_skills": matched_skills,
         "requirements_analysis": requirements_analysis,
     })
+    unmatched_skills = [req.get('display_name') for req in requirements if req.get('display_name') not in matched_skills]
+    print(f"📊 [Market Analysis] Candidate Match: {lead.get('name', 'Unknown')} | Score: {match_percentage}% | Matched: {matched_skills} | Unmatched: {unmatched_skills}", flush=True)
     return lead
 
 
@@ -331,6 +346,35 @@ def generate_feedback_summary(jd_summary, matched_skills, requirements_analysis,
 
 OLLAMA_API_URL = "http://10.153.204.33:11434/api/generate"
 MODEL_NAME = "llama3:latest"
+
+def resolve_ollama_config():
+    import requests
+    # Try localhost first
+    try:
+        r = requests.get("http://10.153.204.33:11434/api/tags", timeout=1.5)
+        if r.status_code == 200:
+            models = [m['name'] for m in r.json().get('models', [])]
+            for preferred in ["gemma4:e4b", "qwen2.5-coder:14b", "llama3:latest"]:
+                if preferred in models:
+                    return "http://10.153.204.33:11434/api/generate", preferred
+            if models:
+                return "http://10.153.204.33:11434/api/generate", models[0]
+    except Exception:
+        pass
+
+    # Try remote IP next
+    try:
+        r = requests.get("http://10.153.204.33:11434/api/tags", timeout=1.5)
+        if r.status_code == 200:
+            return "http://10.153.204.33:11434/api/generate", "llama3:latest"
+    except Exception:
+        pass
+
+    # Default fallback
+    return "http://10.153.204.33:11434/api/generate", "gemma4:e4b"
+
+OLLAMA_API_URL, MODEL_NAME = resolve_ollama_config()
+print(f"DEBUG: Resolved Ollama config to {OLLAMA_API_URL} with model {MODEL_NAME}", flush=True)
 
 # Global lock — Naukri only allows ONE active Resdex session at a time.
 # This prevents sourcing + market analysis from launching two Chromium windows simultaneously.
@@ -915,7 +959,8 @@ def source():
             keywords, 
             min_exp=keywords.get('min_exp', 2), 
             max_exp=keywords.get('max_exp', 8),
-            page_num=page_num
+            page_num=page_num,
+            profile_path=profile_path
         ))
     except Exception as e:
         print(f"Async search error: {e}")
@@ -1036,32 +1081,32 @@ def source():
             if valid_keywords:
                 for kw in valid_keywords:
                     # Direct check of whole phrase
-                    if kw in experience_text:
+                    if is_keyword_in_text(kw, experience_text):
                         found = True
                         matching_keyword = kw
                         for s in sentences:
-                            if kw in s.lower():
+                            if is_keyword_in_text(kw, s):
                                 matching_sentence = clean_evidence(s.strip(), kw)
                                 break
                         break
                     
                     # Singular check
-                    if kw.endswith('s') and len(kw) > 3 and kw[:-1] in experience_text:
+                    if kw.endswith('s') and len(kw) > 3 and is_keyword_in_text(kw[:-1], experience_text):
                         found = True
                         matching_keyword = kw[:-1]
                         for s in sentences:
-                            if kw[:-1] in s.lower():
+                            if is_keyword_in_text(kw[:-1], s):
                                 matching_sentence = clean_evidence(s.strip(), kw[:-1])
                                 break
                         break
                         
                     # Flexible sub-word check for multi-word concepts
                     sub_words = [w.strip() for w in kw.split() if len(w.strip()) > 1]
-                    if len(sub_words) > 1 and all(w in experience_text for w in sub_words):
+                    if len(sub_words) > 1 and all(is_keyword_in_text(w, experience_text) for w in sub_words):
                         found = True
                         matching_keyword = sub_words[0]
                         for s in sentences:
-                            if any(w in s.lower() for w in sub_words):
+                            if any(is_keyword_in_text(w, s) for w in sub_words):
                                 matching_sentence = clean_evidence(s.strip(), sub_words[0])
                                 break
                         break
@@ -1191,7 +1236,7 @@ Return ONLY valid JSON in this exact format. No extra text:
 
             Resume/Profile Text:
             {resume_section[:3000]}
-            """/api/analyze
+            """
             try:
                 payload = {"model": MODEL_NAME, "prompt": project_prompt, "stream": False, "format": "json"}
                 response = requests.post(OLLAMA_API_URL, json=payload, timeout=30)
@@ -1252,6 +1297,8 @@ Return ONLY valid JSON in this exact format. No extra text:
                 "evaluation_bullets": summary.get('evaluation_bullets', [])
             }
         })
+        unmatched_skills = [req.get('display_name') for req in requirements if req.get('display_name') not in matched_skills]
+        print(f"🔍 [Resume Screening] Candidate Match: {lead.get('name', 'Unknown')} | Score: {match_percentage}% | Matched: {matched_skills} | Unmatched: {unmatched_skills}", flush=True)
         return lead
 
     print(f"Analyzing {len(raw_leads)} candidates in parallel...", flush=True)
@@ -1273,6 +1320,7 @@ def market_analysis():
     # user_id = get_jwt_identity()
     user_id = 1
     print(f"Source request from user {user_id}")
+    profile_path = "naukri_profile"
     data = request.get_json()
     jd = data.get('jd', '').strip()
     if not jd:
@@ -1280,9 +1328,29 @@ def market_analysis():
 
     # Get search keywords from JD
     keywords_data = sourcing_agent.get_search_keywords(jd, for_market_analysis=True)
-    query = keywords_data.get('boolean_query', ' '.join(keywords_data.get('primary_keywords', [])))
-    jd_min_exp = keywords_data.get('min_exp', 2)
-    jd_max_exp = keywords_data.get('max_exp', 10)
+    # Format the UI query display string to show the clean mandatory/optional chips used
+    mand_str = ", ".join(keywords_data.get('mandatory_skills', []))
+    opt_str = ", ".join(keywords_data.get('optional_skills', []))
+    query = f"Mandatory: {mand_str}"
+    if opt_str:
+        query += f" | Optional: {opt_str}"
+    jd_min_exp_raw = keywords_data.get('min_exp')
+    if jd_min_exp_raw is None or str(jd_min_exp_raw).strip().lower() in ("n/a", "none"):
+        jd_min_exp = 2
+    else:
+        try:
+            jd_min_exp = int(jd_min_exp_raw)
+        except Exception:
+            jd_min_exp = 2
+
+    jd_max_exp_raw = keywords_data.get('max_exp')
+    if jd_max_exp_raw is None or str(jd_max_exp_raw).strip().lower() in ("n/a", "none"):
+        jd_max_exp = 10
+    else:
+        try:
+            jd_max_exp = int(jd_max_exp_raw)
+        except Exception:
+            jd_max_exp = 10
 
     # ⚠️ Market Analysis: scan ALL experience levels (0-25y) to get the full market picture.
     # The JD's target range is shown as reference — NOT used to filter Naukri results.
@@ -1299,7 +1367,13 @@ def market_analysis():
     naukri_browser_in_use['by'] = 'Market Analysis'
     try:
         # Scan up to 15 pages (600 candidates) to capture the complete market talent pool
-        candidates = asyncio.run(sourcing_agent.market_scan_search(keywords_data, MARKET_MIN_EXP, MARKET_MAX_EXP, max_pages=15))
+        candidates = asyncio.run(sourcing_agent.market_scan_search(
+            keywords_data, 
+            MARKET_MIN_EXP, 
+            MARKET_MAX_EXP, 
+            max_pages=15,
+            profile_path=profile_path
+        ))
     except Exception as e:
         print(f"Market scan error: {e}", flush=True)
         candidates = []
